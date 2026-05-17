@@ -890,3 +890,62 @@ input, select, textarea {
   .fgrid { grid-template-columns: 1fr; }
   .opopts { flex-direction: column; }
 }
+/* ── MOBILE FIRST ── */
+@media (max-width: 768px) {
+.lay { grid-template-columns: 1fr; }
+.sc { border-top: 1px solid var(--gray-100); order: 2; }
+.mc { order: 1; }
+.htitle { font-size: 44px; }
+.hero-img { width: 40%; opacity: 0.2; }
+.cgrid { grid-template-columns: 1fr 1fr; }
+.hero-inner { padding: 14px 16px 18px; }
+}
+@media (max-width: 480px) {
+.pb-app { font-size: 13px; }
+.hero-inner { padding: 12px 14px 16px; }
+.hero-img { display: none; }
+.hero-fade { background: var(--green); }
+.htitle { font-size: 36px; margin-bottom: 6px; }
+.hsub { font-size: 12px; margin-bottom: 10px; }
+.gbar { font-size: 11px; padding: 6px 10px; }
+.tabs { padding: 4px 6px 0; gap: 4px; }
+.tab { font-size: 13px; padding: 11px 10px; gap: 6px; }
+.mc { padding: 14px 12px; }
+.sc { padding: 12px; }
+.cgrid { grid-template-columns: 1fr 1fr; gap: 6px; }
+.cc { padding: 9px 10px; }
+.cname { font-size: 14px; }
+.slots-wrap { gap: 4px; }
+.slot { padding: 5px 9px; font-size: 11px; }
+.dur-row { gap: 5px; }
+.dc { padding: 6px 10px; font-size: 11px; }
+.fgrid { grid-template-columns: 1fr; gap: 6px; }
+.finp { padding: 10px 12px; font-size: 14px; }
+.ctarow { flex-direction: column; gap: 10px; align-items: stretch; }
+.pbig { font-size: 28px; }
+.rbtn { width: 100%; justify-content: center; padding: 14px; font-size: 18px; }
+.opopts { flex-direction: column; gap: 7px; }
+.opopt { padding: 12px; display: flex; align-items: center; gap: 10px; flex-direction: row; }
+.opopt-ico { font-size: 20px; margin-bottom: 0; }
+.date-strip { gap: 5px; }
+.date-chip { min-width: 58px; padding: 6px 10px; }
+.date-chip .dd { font-size: 18px; }
+.rcard { padding: 10px; }
+.rname { font-size: 13px; }
+.stitle { font-size: 11px; margin-bottom: 8px; }
+.cbox .cmsgs { max-height: 160px; }
+.modal { width: calc(100vw - 24px); }
+.mbody { padding: 14px; }
+.sov { padding: 20px 16px; gap: 10px; }
+.st { font-size: 42px; }
+.ss { font-size: 13px; }
+.hnav { margin-bottom: 10px; }
+.logo-img { height: 28px; }
+.vbadge { display: none; }
+.opintr { font-size: 12px; padding: 10px 12px; }
+}
+@media (max-width: 360px) {
+.htitle { font-size: 30px; }
+.tab { font-size: 12px; padding: 10px 8px; }
+.cgrid { grid-template-columns: 1fr 1fr; }
+}
