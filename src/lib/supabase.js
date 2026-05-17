@@ -11,9 +11,9 @@ export const COURTS = ['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4']
 export const COURT_IDS = [1, 2, 3, 4]
 
 // Precios canchas privadas
-export const PRICES = { 60: 400, 90: 600, 120: 750, 150: 950 }
-export const OPEN_PLAY_PRICE = 200 // por persona
-export const DEPOSIT = 50 // garantia
+export const PRICES = { 60: 450, 90: 650, 120: 800, 150: 1050 }
+export const OPEN_PLAY_PRICE = 250
+export const DEPOSIT = 50
 
 // Obtener slots ocupados para una cancha y fecha dada
 // Consulta bookings + tour_bookings + drills del calendario general
@@ -82,8 +82,8 @@ export async function getOpenPlayRooms(dateStr) {
 // Crear reserva de cancha privada (desde sitio publico)
 export async function createPublicBooking({ date, hour, startMinute, court, duration, name, phone, email }) {
   const durationHours = duration / 60
-  const prices = { 60: 400, 90: 600, 120: 750, 150: 950 }
-  const revenue = prices[duration] || 400
+  const prices = { 60: 450, 90: 650, 120: 800, 150: 1050 }
+  const revenue = prices[duration] || 450
 
   const { data, error } = await supabase
     .from('bookings')
