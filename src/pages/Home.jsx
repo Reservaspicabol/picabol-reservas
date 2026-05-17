@@ -430,24 +430,37 @@ export default function Home() {
 
   function renderSlots() {
     if (loadingSlots) return <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)'}}>Consultando disponibilidad...</span></div>
+    const now = new Date()
+    const isToday = selDateIdx === 0
+    const minHour = isToday ? now.getHours() + 2 + (now.getMinutes() > 0 ? 1 : 0) : 0
     const slots = []
+    let hasAvailable = false
     for (let h = 8; h <= 22; h++) {
       for (const m of ['00', '30']) {
         if (h === 22 && m === '30') continue
+        const slotMins = h * 60 + (m === '30' ? 30 : 0)
+        const nowMins = now.getHours() * 60 + now.getMinutes()
+        const isPast = isToday && slotMins < nowMins + 120 // 2 horas de diferencia
+        const taken = occupiedSlots.has(`${h}:${m}`)
+        if (isPast || taken) continue // solo mostramos disponibles
+        hasAvailable = true
         const key = `${h}:${m}`
-        const taken = occupiedSlots.has(key)
         slots.push(
           <button
             key={key}
-            className={`slot ${taken ? 'tk' : ''} ${selSlot === key && !taken ? 'on' : ''}`}
-            onClick={() => !taken && setSelSlot(key)}
-            disabled={taken}
+            className={`slot ${selSlot === key ? 'on' : ''}`}
+            onClick={() => setSelSlot(key)}
           >
             {String(h).padStart(2,'0')}:{m}
           </button>
         )
       }
     }
+    if (!hasAvailable) return (
+      <p style={{fontSize:12,color:'var(--gray-500)',fontStyle:'italic',padding:'8px 0'}}>
+        {lang==='es' ? 'No hay horarios disponibles para este día. Prueba otro día o escríbele a PIKA.' : 'No available slots for this day. Try another day or message PIKA.'}
+      </p>
+    )
     return slots
   }
 
@@ -520,6 +533,7 @@ export default function Home() {
         </button>
         <button className={`tab ${mode==='open'?'on':''}`} onClick={() => setMode('open')}>
           🏓 {t.tabOpen}
+          {mode!=='open' && <span className="tab-hint">↓</span>}
         </button>
       </div>
 
@@ -677,7 +691,28 @@ export default function Home() {
             <div className="chdr">
               <div className="cav">P</div>
               <div className="chinfo">
-                <div className="chname">PIKA</div>
+                <div className="chname" style={{display:'flex',alignItems:'center',gap:6}}>
+                  PIKA
+                  {/* Gatito kawaii */}
+                  <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <ellipse cx="11" cy="13" rx="7" ry="6" fill="#1a1916"/>
+                    <polygon points="5,8 7,3 9,8" fill="#1a1916"/>
+                    <polygon points="13,8 15,3 17,8" fill="#1a1916"/>
+                    <polygon points="5.5,8 7,4.5 8.5,8" fill="#d4e84a" opacity="0.7"/>
+                    <polygon points="13.5,8 15,4.5 16.5,8" fill="#d4e84a" opacity="0.7"/>
+                    <ellipse cx="8.5" cy="13" rx="1.8" ry="2.2" fill="#3d5a2e"/>
+                    <ellipse cx="13.5" cy="13" rx="1.8" ry="2.2" fill="#3d5a2e"/>
+                    <circle cx="8.5" cy="13" r="1" fill="black"/>
+                    <circle cx="13.5" cy="13" r="1" fill="black"/>
+                    <circle cx="9" cy="12.5" r="0.4" fill="white"/>
+                    <circle cx="14" cy="12.5" r="0.4" fill="white"/>
+                    <ellipse cx="11" cy="15.5" rx="1" ry="0.6" fill="#d4e84a" opacity="0.8"/>
+                    <line x1="7" y1="15" x2="4" y2="14.5" stroke="#d4e84a" strokeWidth="0.5" opacity="0.6"/>
+                    <line x1="7" y1="15.5" x2="4" y2="15.5" stroke="#d4e84a" strokeWidth="0.5" opacity="0.6"/>
+                    <line x1="15" y1="15" x2="18" y2="14.5" stroke="#d4e84a" strokeWidth="0.5" opacity="0.6"/>
+                    <line x1="15" y1="15.5" x2="18" y2="15.5" stroke="#d4e84a" strokeWidth="0.5" opacity="0.6"/>
+                  </svg>
+                </div>
                 <div className="chsub">{t.chatSub}</div>
               </div>
               <div className="chst"/>
