@@ -5,7 +5,7 @@ import {
   createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
-import './Home.css'
+
 
 // ── Traducciones ──────────────────────────────────────────────────────────────
 const T = {
@@ -444,12 +444,12 @@ export default function Home() {
     <div className="pb-app">
       {/* HERO */}
       <div className="hero">
-        <img className="hero-img" src="/foto.jpg" alt="PICABOL canchas Cancún"/>
+        <img className="hero-img" src="/foto.jpeg" alt="PICABOL canchas Cancún"/>
         <div className="hero-fade" />
         <div className="hero-inner">
           <nav className="hnav">
             <div className="logo-area">
-              <img className="logo-img" src="/logo.webp" alt="PICABOL"/>
+              <img className="logo-img" src="/picabol22.png" alt="PICABOL"/>
               <span className="logo-badge">CANCÚN</span>
             </div>
             <div className="nav-r">
