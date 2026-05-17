@@ -216,7 +216,7 @@ export default function Home() {
 
   // UI state
   const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess] = useState(null) // { ref, type }
+  const [success, setSuccess] = useState(null) // { ref, type, details }
   const [visitCount] = useState(() => Math.floor(900 + Math.random() * 300))
 
   // Pika chat
@@ -287,10 +287,25 @@ export default function Home() {
         phone: bkPhone,
         email: bkEmail,
       })
-      setSuccess({ ref: formatRef(), type: 'cancha' })
+      setSuccess({
+        ref: formatRef(),
+        type: 'cancha',
+        details: {
+          name: bkName,
+          phone: bkPhone,
+          email: bkEmail,
+          court: COURTS[selCourt],
+          date: dates[selDateIdx].iso,
+          time: selSlot,
+          duration: selDur,
+          price: PRICES[selDur],
+        }
+      })
     } catch (e) {
-      alert(lang === 'es' ? 'Error al crear la reserva. Intenta de nuevo.' : 'Booking error. Please try again.')
       console.error(e)
+      alert(lang === 'es'
+        ? `Error al crear la reserva: ${e.message || 'Intenta de nuevo'}` 
+        : `Booking error: ${e.message || 'Please try again'}`)
     } finally {
       setSubmitting(false)
     }
@@ -307,19 +322,34 @@ export default function Home() {
       await createOpenPlayRoom({
         date: dates[createDateIdx].iso,
         hour: h,
-        court: COURTS[0], // Primera cancha disponible, ajustable
+        court: COURTS[0],
         roomName: salaName,
         hostName: salaHost,
         phone: salaTel,
         email: salaEmail,
         members: players,
       })
-      setSuccess({ ref: formatRef(), type: 'open' })
+      setSuccess({
+        ref: formatRef(),
+        type: 'open',
+        details: {
+          name: salaHost,
+          phone: salaTel,
+          email: salaEmail,
+          roomName: salaName,
+          date: dates[createDateIdx].iso,
+          time: salaHour,
+          members: [salaHost, ...players],
+          price: OPEN_PLAY_PRICE,
+        }
+      })
       setSideDateIdx(createDateIdx)
       setTimeout(loadRooms, 500)
     } catch (e) {
-      alert(lang === 'es' ? 'Error al crear la sala.' : 'Error creating room.')
       console.error(e)
+      alert(lang === 'es'
+        ? `Error al crear la sala: ${e.message || 'Intenta de nuevo'}`
+        : `Error creating room: ${e.message || 'Please try again'}`)
     } finally {
       setSubmitting(false)
     }
@@ -333,12 +363,27 @@ export default function Home() {
     setSubmitting(true)
     try {
       await joinOpenPlayRoom(joinRoom.id, joinName, joinPhone, joinEmail)
+      const { roomName } = extractRoomInfo(joinRoom)
       setJoinRoom(null)
-      setSuccess({ ref: formatRef(), type: 'open' })
+      setSuccess({
+        ref: formatRef(),
+        type: 'open',
+        details: {
+          name: joinName,
+          phone: joinPhone,
+          email: joinEmail,
+          roomName,
+          date: dates[sideDateIdx].iso,
+          time: `${String(joinRoom.hour).padStart(2,'0')}:00`,
+          price: OPEN_PLAY_PRICE,
+        }
+      })
       setTimeout(loadRooms, 500)
     } catch (e) {
-      alert(lang === 'es' ? 'Error al unirse.' : 'Error joining room.')
       console.error(e)
+      alert(lang === 'es'
+        ? `Error al unirse: ${e.message || 'Intenta de nuevo'}`
+        : `Error joining: ${e.message || 'Please try again'}`)
     } finally {
       setSubmitting(false)
     }
@@ -719,12 +764,34 @@ export default function Home() {
         <div className="sov fade-in">
           <div className="sico">✓</div>
           <div className="st">{t.success}</div>
-          <p className="ss">{t.successSub}</p>
-          <p className="ss" style={{fontSize:12,marginTop:4}}>{t.successNote}</p>
-          <div className="sref">{success.ref}</div>
-          <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginTop:4}}>
-            {lang==='es'?'Esta reserva proviene del sitio web público':'This booking came from the public website'}
+          {success.details && (
+            <div style={{background:'rgba(255,255,255,0.07)',border:'1px solid rgba(212,232,74,0.3)',borderRadius:12,padding:'16px 24px',width:'100%',maxWidth:340,textAlign:'left',margin:'4px 0'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+                <span style={{color:'var(--lime)',fontFamily:'var(--font-d)',fontSize:11,letterSpacing:2}}>
+                  {success.type==='cancha'?'RESERVA DE CANCHA':'OPEN PLAY'}
+                </span>
+                <span style={{color:'rgba(255,255,255,0.4)',fontSize:11}}>{success.ref}</span>
+              </div>
+              <div style={{fontSize:13,color:'#fff',marginBottom:4}}>👤 <strong>{success.details.name}</strong></div>
+              <div style={{fontSize:12,color:'rgba(255,255,255,0.6)',marginBottom:2}}>📱 {success.details.phone}</div>
+              <div style={{fontSize:12,color:'rgba(255,255,255,0.6)',marginBottom:8}}>✉️ {success.details.email}</div>
+              <div style={{borderTop:'1px solid rgba(255,255,255,0.1)',paddingTop:8}}>
+                {success.type==='cancha' ? <>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🎾 {success.details.court} · {success.details.time}</div>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>📅 {success.details.date}</div>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>⏱ {success.details.duration} min · <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong></div>
+                </> : <>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🏓 {success.details.roomName}</div>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>📅 {success.details.date} · {success.details.time}</div>
+                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>💰 <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong> {lang==='es'?'por persona':'per person'}</div>
+                </>}
+              </div>
+            </div>
+          )}
+          <div style={{background:'rgba(212,232,74,0.1)',border:'1px solid rgba(212,232,74,0.2)',borderRadius:8,padding:'8px 16px',fontSize:12,color:'var(--lime)',maxWidth:340,textAlign:'center'}}>
+            🔒 {lang==='es'?'Depósito $50 MXN · 10 min de tolerancia para llegar':'$50 MXN deposit · 10 min grace period'}
           </div>
+          <p className="ss">{t.successSub}</p>
           <button className="dis" onClick={resetSuccess}>{t.backHome}</button>
         </div>
       )}
