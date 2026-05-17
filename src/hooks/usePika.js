@@ -209,7 +209,7 @@ REGLAS:
 - Para fechas fuera de los 3 dias del calendario, usaras las herramientas normalmente`
 
 async function callClaude(messages) {
-  const resp = await fetch('/api/pika', {
+  const resp = await fetch('/.netlify/functions/pika', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
