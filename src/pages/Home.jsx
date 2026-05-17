@@ -5,7 +5,7 @@ import {
   createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
-import styles from './Home.module.css'
+import './Home.css'
 
 // ── Traducciones ──────────────────────────────────────────────────────────────
 const T = {
