@@ -8,7 +8,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 // Horas de operacion
 export const HOURS = Array.from({ length: 15 }, (_, i) => i + 8) // 8 a 22
 export const COURTS = ['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4']
-export const COURT_IDS = [1, 2, 3, 4]
+export const COURT_NUMS = [1, 2, 3, 4]
 
 // Precios canchas privadas
 export const PRICES = { 60: 450, 90: 650, 120: 800, 150: 1050 }
@@ -18,14 +18,14 @@ export const DEPOSIT = 50
 // Obtener slots ocupados para una cancha y fecha dada
 // Consulta bookings + tour_bookings + drills del calendario general
 export async function getOccupiedSlots(courtIndex, dateStr) {
-  const court = COURTS[courtIndex]
+  const courtNum = courtIndex + 1 // 0->1, 1->2, etc
 
   // Reservas normales (privada, openplay)
   const { data: bookings } = await supabase
     .from('bookings')
     .select('hour, start_minute, duration, modality')
     .eq('date', dateStr)
-    .eq('court', court)
+    .eq('court', courtNum)
     .in('status', ['reserved', 'playing'])
 
   // Drills
@@ -33,7 +33,7 @@ export async function getOccupiedSlots(courtIndex, dateStr) {
     .from('drills')
     .select('hour')
     .eq('date', dateStr)
-    .eq('court', court)
+    .eq('court', courtNum)
     .neq('status', 'cancelled')
 
   // Tours (usan cancha tambien)
@@ -41,7 +41,7 @@ export async function getOccupiedSlots(courtIndex, dateStr) {
     .from('tour_bookings')
     .select('hour, court')
     .eq('date', dateStr)
-    .eq('court', court)
+    .eq('court', courtNum)
     .neq('status', 'cancelled')
 
   const occupied = new Set()
@@ -84,6 +84,8 @@ export async function createPublicBooking({ date, hour, startMinute, court, dura
   const durationHours = duration / 60
   const prices = { 60: 450, 90: 650, 120: 800, 150: 1050 }
   const revenue = prices[duration] || 450
+  // court can be "Cancha 1" or number — extract number
+  const courtNum = typeof court === 'number' ? court : parseInt(court.replace('Cancha ', '')) || 1
 
   const { data, error } = await supabase
     .from('bookings')
@@ -91,8 +93,7 @@ export async function createPublicBooking({ date, hour, startMinute, court, dura
       date,
       hour,
       start_minute: startMinute,
-      court,
-      modality: 'privada',
+      court: courtNum,
       name,
       notes: `Tel: ${phone} | Email: ${email} | SITIO WEB PUBLICO`,
       status: 'reserved',
@@ -113,6 +114,7 @@ export async function createPublicBooking({ date, hour, startMinute, court, dura
 export async function createOpenPlayRoom({ date, hour, court, roomName, hostName, phone, email, members }) {
   const peopleCount = members.length + 1 // titular + jugadores
   const revenue = OPEN_PLAY_PRICE * peopleCount
+  const courtNum = typeof court === 'number' ? court : parseInt(String(court).replace('Cancha ', '')) || 1
 
   const { data, error } = await supabase
     .from('bookings')
@@ -120,7 +122,7 @@ export async function createOpenPlayRoom({ date, hour, court, roomName, hostName
       date,
       hour,
       start_minute: 0,
-      court,
+      court: courtNum,
       modality: 'openplay',
       name: hostName,
       notes: `Sala: ${roomName} | Miembros: ${members.join(', ')} | Tel: ${phone} | Email: ${email} | SITIO WEB PUBLICO`,
