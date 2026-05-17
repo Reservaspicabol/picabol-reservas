@@ -209,13 +209,10 @@ REGLAS:
 - Para fechas fuera de los 3 dias del calendario, usaras las herramientas normalmente`
 
 async function callClaude(messages) {
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch('/api/pika', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-client-side-api-key-access': 'true',
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
