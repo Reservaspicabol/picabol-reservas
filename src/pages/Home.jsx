@@ -641,7 +641,7 @@ export default function Home() {
                   const isLoading = courtAvailability[i] === null
                   return (
                     <div key={i} className={`cc ${selCourt===i?'on':''}`} onClick={() => setSelCourt(i)}>
-                      <div className="cname">{c}</div>
+                      <div className="cname">{lang === 'en' ? `Court ${i+1}` : c}</div>
                       <div className="cst">
                         {isLoading ? (
                           <span style={{color:'var(--gray-300)',fontSize:11}}>···</span>
