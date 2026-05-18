@@ -239,7 +239,16 @@ export default function Home() {
   }, [selDateIdx, selCourt])
 
   useEffect(() => {
-    loadRooms()
+    loadRooms(sideDateIdx)
+    // Realtime — actualizar salas cuando cambia cualquier booking de openplay
+    const channel = supabase
+      .channel('public-openplay')
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'bookings',
+        filter: 'modality=eq.openplay'
+      }, () => loadRooms(sideDateIdx))
+      .subscribe()
+    return () => supabase.removeChannel(channel)
   }, [sideDateIdx])
 
   useEffect(() => {
@@ -286,10 +295,11 @@ export default function Home() {
     }
   }
 
-  async function loadRooms() {
+  async function loadRooms(dateIdx) {
     setLoadingRooms(true)
     try {
-      const rooms = await getOpenPlayRooms(dates[sideDateIdx]?.iso || dates[0].iso)
+      const idx = dateIdx !== undefined ? dateIdx : sideDateIdx
+      const rooms = await getOpenPlayRooms(dates[idx]?.iso || dates[0].iso)
       setOpenRooms(rooms)
     } catch (e) {
       console.error(e)
@@ -404,7 +414,8 @@ export default function Home() {
         }
       })
       setSideDateIdx(createDateIdx)
-      setTimeout(loadRooms, 500)
+      players.length > 0 && setPlayers([])
+      setTimeout(() => loadRooms(createDateIdx), 300)
     } catch (e) {
       console.error(e)
       alert(lang === 'es'
@@ -438,7 +449,7 @@ export default function Home() {
           price: OPEN_PLAY_PRICE,
         }
       })
-      setTimeout(loadRooms, 500)
+      setTimeout(() => loadRooms(sideDateIdx), 300)
     } catch (e) {
       console.error(e)
       alert(lang === 'es'
@@ -693,8 +704,101 @@ export default function Home() {
                 <div>
                   <p className="slbl">{t.labFecha}</p>
                   {renderDateStrip(opDateIdx, i => { setOpDateIdx(i); setSideDateIdx(i) }, 'opds')}
-                  <p className="joinhint">{t.joinHint}</p>
-                  <div className="pikatip">
+
+                  {/* Salas del día — panel central completo */}
+                  <div style={{marginTop:14}}>
+                    {loadingRooms ? (
+                      <div className="loading-row"><Spinner /><span style={{marginLeft:8,color:'var(--gray-500)',fontSize:12}}>Cargando salas...</span></div>
+                    ) : openRooms.length === 0 ? (
+                      <div style={{textAlign:'center',padding:'24px 16px',background:'var(--offwhite)',borderRadius:'var(--r)',border:'1.5px dashed var(--gray-100)'}}>
+                        <div style={{fontSize:32,marginBottom:8}}>🏓</div>
+                        <p style={{fontSize:13,color:'var(--gray-500)',marginBottom:6}}>{t.noRooms}</p>
+                        <button className="rbtn" style={{fontSize:14,padding:'10px 20px',margin:'0 auto'}} onClick={() => setOpMode('create')}>
+                          ✨ {t.opCreate}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                        {openRooms.map(r => {
+                          const {roomName, members} = extractRoomInfo(r)
+                          const allMembers = [r.name, ...members]
+                          return (
+                            <div key={r.id} style={{
+                              background:'var(--white)',
+                              border:'1.5px solid var(--gray-100)',
+                              borderRadius:'var(--r)',
+                              overflow:'hidden',
+                              transition:'all 0.2s',
+                              cursor:'pointer',
+                            }}
+                            onClick={() => { setJoinRoom(r); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor='var(--green)'}
+                            onMouseLeave={e => e.currentTarget.style.borderColor='var(--gray-100)'}
+                            >
+                              {/* Header sala */}
+                              <div style={{background:'var(--green)',padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                                <div>
+                                  <div style={{fontFamily:'var(--font-d)',fontSize:17,fontWeight:800,color:'#fff',letterSpacing:'0.5px'}}>{roomName}</div>
+                                  <div style={{fontSize:11,color:'rgba(255,255,255,0.65)',marginTop:1}}>{lang==='es'?'Titular':'Host'}: {r.name}</div>
+                                </div>
+                                <div style={{textAlign:'right'}}>
+                                  <div style={{background:'var(--lime)',color:'var(--green)',padding:'3px 10px',borderRadius:20,fontFamily:'var(--font-d)',fontSize:12,fontWeight:800}}>
+                                    ⏰ {String(r.hour).padStart(2,'0')}:00
+                                  </div>
+                                  <div style={{fontSize:10,color:'rgba(255,255,255,0.6)',marginTop:3}}>3 {lang==='es'?'horas':'hours'}</div>
+                                </div>
+                              </div>
+
+                              {/* Body sala */}
+                              <div style={{padding:'12px 14px'}}>
+                                {/* Jugadores */}
+                                <div style={{marginBottom:10}}>
+                                  <div style={{fontSize:10,letterSpacing:'2px',color:'var(--gray-500)',textTransform:'uppercase',fontFamily:'var(--font-d)',fontWeight:700,marginBottom:7}}>
+                                    {lang==='es'?'JUGADORES':'PLAYERS'} ({allMembers.length})
+                                  </div>
+                                  <div style={{display:'flex',flexWrap:'wrap',gap:5}}>
+                                    {allMembers.map((m,i) => (
+                                      <div key={i} style={{
+                                        display:'flex',alignItems:'center',gap:5,
+                                        background:'var(--lime-soft)',border:'1px solid var(--lime-bright)',
+                                        borderRadius:20,padding:'4px 10px',fontSize:12,color:'var(--green)',fontWeight:500
+                                      }}>
+                                        <div style={{
+                                          width:20,height:20,borderRadius:'50%',
+                                          background:AV_COLORS[i%AV_COLORS.length],
+                                          display:'flex',alignItems:'center',justifyContent:'center',
+                                          fontSize:8,fontWeight:800,color:'var(--green)',flexShrink:0
+                                        }}>{m.slice(0,2).toUpperCase()}</div>
+                                        {m}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Precio y accion */}
+                                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',paddingTop:10,borderTop:'1px solid var(--gray-100)'}}>
+                                  <div>
+                                    <div style={{fontFamily:'var(--font-d)',fontSize:22,fontWeight:800,color:'var(--green)'}}>
+                                      ${OPEN_PLAY_PRICE} MXN
+                                    </div>
+                                    <div style={{fontSize:11,color:'var(--gray-500)'}}>
+                                      {lang==='es'?'por persona · anticipo':'per person · deposit'} $50 MXN
+                                    </div>
+                                  </div>
+                                  <button className="rbtn" style={{fontSize:14,padding:'10px 20px'}}
+                                    onClick={e => { e.stopPropagation(); setJoinRoom(r); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}>
+                                    🤝 {lang==='es'?'UNIRME':'JOIN'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pikatip" style={{marginTop:14}}>
                     💬 {t.pikaFutureHint}
                   </div>
                 </div>
