@@ -193,6 +193,7 @@ export default function Home() {
   const [selDur, setSelDur] = useState(60)
   const [occupiedSlots, setOccupiedSlots] = useState(new Set())
   const [loadingSlots, setLoadingSlots] = useState(false)
+  const [courtAvailability, setCourtAvailability] = useState([null, null, null, null]) // null=loading, true=available, false=occupied
   const [bkName, setBkName] = useState('')
   const [bkPhone, setBkPhone] = useState('')
   const [bkEmail, setBkEmail] = useState('')
@@ -232,6 +233,7 @@ export default function Home() {
 
   useEffect(() => {
     loadSlots()
+    loadAllCourtsAvailability()
   }, [selDateIdx, selCourt])
 
   useEffect(() => {
@@ -248,6 +250,33 @@ export default function Home() {
       console.error(e)
     } finally {
       setLoadingSlots(false)
+    }
+  }
+
+  async function loadAllCourtsAvailability() {
+    const now = new Date()
+    const isToday = selDateIdx === 0
+    const nowMins = now.getHours() * 60 + now.getMinutes()
+    try {
+      const results = await Promise.all(
+        COURTS.map((_, i) => getOccupiedSlots(i, dates[selDateIdx].iso))
+      )
+      const availability = results.map(occupied => {
+        // Check if there's at least one available slot in the future
+        for (let h = 8; h <= 22; h++) {
+          for (const m of ['00', '30']) {
+            if (h === 22 && m === '30') continue
+            const slotMins = h * 60 + (m === '30' ? 30 : 0)
+            if (isToday && slotMins < nowMins + 120) continue
+            if (!occupied.has(`${h}:${m}`)) return true
+          }
+        }
+        return false
+      })
+      setCourtAvailability(availability)
+    } catch (e) {
+      console.error(e)
+      setCourtAvailability([true, true, true, true])
     }
   }
 
@@ -550,15 +579,27 @@ export default function Home() {
 
               <p className="slbl">{t.labCancha}</p>
               <div className="cgrid">
-                {COURTS.map((c, i) => (
-                  <div key={i} className={`cc ${selCourt===i?'on':''}`} onClick={() => setSelCourt(i)}>
-                    <div className="cname">{c}</div>
-                    <div className="cst">
-                      <span className={`cdot ${selCourt===i?'':'off'}`}/>
-                      {selCourt===i ? t.available : '—'}
+                {COURTS.map((c, i) => {
+                  const isAvail = courtAvailability[i]
+                  const isLoading = courtAvailability[i] === null
+                  return (
+                    <div key={i} className={`cc ${selCourt===i?'on':''}`} onClick={() => setSelCourt(i)}>
+                      <div className="cname">{c}</div>
+                      <div className="cst">
+                        {isLoading ? (
+                          <span style={{color:'var(--gray-300)',fontSize:11}}>···</span>
+                        ) : (
+                          <>
+                            <span className={`cdot ${isAvail ? '' : 'off'}`}/>
+                            <span style={{color: isAvail ? '#5cb85c' : '#e05e3a'}}>
+                              {isAvail ? t.available : t.occupied}
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               <p className="slbl">{t.labHora}</p>
