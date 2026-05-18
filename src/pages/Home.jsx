@@ -193,7 +193,9 @@ export default function Home() {
   const [selDur, setSelDur] = useState(60)
   const [occupiedSlots, setOccupiedSlots] = useState(new Set())
   const [loadingSlots, setLoadingSlots] = useState(false)
-  const [courtAvailability, setCourtAvailability] = useState([null, null, null, null]) // null=loading, true=available, false=occupied
+  const [courtAvailability, setCourtAvailability] = useState([null, null, null, null])
+  const [openOccupiedSlots, setOpenOccupiedSlots] = useState(new Set())
+  const [loadingOpenSlots, setLoadingOpenSlots] = useState(false)
   const [bkName, setBkName] = useState('')
   const [bkPhone, setBkPhone] = useState('')
   const [bkEmail, setBkEmail] = useState('')
@@ -239,6 +241,10 @@ export default function Home() {
   useEffect(() => {
     loadRooms()
   }, [sideDateIdx])
+
+  useEffect(() => {
+    loadOpenSlots()
+  }, [createDateIdx])
 
   async function loadSlots() {
     setLoadingSlots(true)
@@ -289,6 +295,31 @@ export default function Home() {
       console.error(e)
     } finally {
       setLoadingRooms(false)
+    }
+  }
+
+  async function loadOpenSlots() {
+    setLoadingOpenSlots(true)
+    try {
+      // Check court 1 (index 0) for open play availability — open play uses any available court
+      const occupied = await getOccupiedSlots(0, dates[createDateIdx].iso)
+      setOpenOccupiedSlots(occupied)
+      // Auto-select first available slot
+      const now = new Date()
+      const isToday = createDateIdx === 0
+      const nowMins = now.getHours() * 60 + now.getMinutes()
+      for (let h = 8; h <= 22; h++) {
+        const slotMins = h * 60
+        if (isToday && slotMins < nowMins + 120) continue
+        if (!occupied.has(`${h}:00`)) {
+          setSalaHour(`${h}:00`)
+          break
+        }
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoadingOpenSlots(false)
     }
   }
 
@@ -692,13 +723,43 @@ export default function Home() {
                     <button className="abtn" onClick={addPlayer}>+</button>
                   </div>
                   <p className="slbl" style={{marginTop:12}}>{t.labFecha}</p>
-                  {renderDateStrip(createDateIdx, setCreateDateIdx, 'crds')}
+                  {renderDateStrip(createDateIdx, i => { setCreateDateIdx(i) }, 'crds')}
                   <p className="slbl">{t.hora}</p>
-                  <select className="finp" style={{width:'auto'}} value={salaHour} onChange={e => setSalaHour(e.target.value)}>
-                    {Array.from({length:15},(_,i)=>i+8).map(h=>(
-                      <option key={h} value={`${h}:00`}>{String(h).padStart(2,'0')}:00</option>
-                    ))}
-                  </select>
+                  {loadingOpenSlots ? (
+                    <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)',fontSize:12}}>Consultando disponibilidad...</span></div>
+                  ) : (
+                    <div className="slots-wrap">
+                      {(() => {
+                        const now = new Date()
+                        const isToday = createDateIdx === 0
+                        const nowMins = now.getHours() * 60 + now.getMinutes()
+                        const slots = []
+                        let hasAny = false
+                        for (let h = 8; h <= 22; h++) {
+                          const slotMins = h * 60
+                          if (isToday && slotMins < nowMins + 120) continue
+                          if (openOccupiedSlots.has(`${h}:00`)) continue
+                          hasAny = true
+                          const key = `${h}:00`
+                          slots.push(
+                            <button
+                              key={key}
+                              className={`slot ${salaHour === key ? 'on' : ''}`}
+                              onClick={() => setSalaHour(key)}
+                            >
+                              {String(h).padStart(2,'0')}:00
+                            </button>
+                          )
+                        }
+                        if (!hasAny) return (
+                          <p style={{fontSize:12,color:'var(--gray-500)',fontStyle:'italic',padding:'8px 0'}}>
+                            {lang==='es' ? 'No hay horarios disponibles. Prueba otro día.' : 'No slots available. Try another day.'}
+                          </p>
+                        )
+                        return slots
+                      })()}
+                    </div>
+                  )}
 
                   <div className="ctarow" style={{marginTop:12}}>
                     <div>
