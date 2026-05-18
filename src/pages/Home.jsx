@@ -685,7 +685,11 @@ export default function Home() {
               <div className="ctarow">
                 <div>
                   <div className="pbig">${PRICES[selDur]}</div>
-                  <div className="pnote">{t.deposit}</div>
+                  <div className="pnote">
+                    {lang==='es'
+                      ? `$50 anticipo online · $${PRICES[selDur]-50} al llegar`
+                      : `$50 deposit online · $${PRICES[selDur]-50} on arrival`}
+                  </div>
                 </div>
                 <button className="rbtn" onClick={handleReserve} disabled={submitting}>
                   {submitting ? <Spinner /> : <>{t.reservar} ›</>}
@@ -887,7 +891,7 @@ export default function Home() {
                         <span style={{fontSize:13,fontWeight:400}}> · {players.length + 1} {lang==='es'?'persona':'person'}{players.length > 0 ? 's' : ''}</span>
                       </div>
                       <div style={{fontSize:11,color:'var(--gray-500)'}}>
-                        ${OPEN_PLAY_PRICE} × {players.length + 1} · {lang==='es'?'Anticipo':'Deposit'}: ${DEPOSIT} MXN
+                        ${OPEN_PLAY_PRICE} × {players.length + 1} · {lang==='es'?`$50 anticipo · $${OPEN_PLAY_PRICE-50} al llegar/persona`:`$50 deposit · $${OPEN_PLAY_PRICE-50} on arrival/person`}
                       </div>
                     </div>
                     <button className="rbtn" onClick={handleCreateRoom} disabled={submitting}>
