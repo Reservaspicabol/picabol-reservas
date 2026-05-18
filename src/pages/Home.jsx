@@ -149,12 +149,27 @@ function formatRef() {
 
 function extractRoomInfo(booking) {
   const notes = booking.notes || ''
+  // Nombre de sala
   const salaMatch = notes.match(/Sala: ([^|]+)/)
   const roomName = salaMatch ? salaMatch[1].trim() : `Open Play ${booking.court}`
+
+  // Miembros originales: "Miembros: Ana, Luis"
   const membersMatch = notes.match(/Miembros: ([^|]+)/)
   const membersRaw = membersMatch ? membersMatch[1].trim() : ''
-  const members = membersRaw ? membersRaw.split(',').map(m => m.trim()).filter(Boolean) : []
-  return { roomName, members }
+  const originalMembers = membersRaw
+    ? membersRaw.split(',').map(m => m.trim()).filter(Boolean)
+    : []
+
+  // Miembros que se unieron después: "+ Nombre (tel, email)"
+  const joinedMembers = []
+  const joinPattern = /\+([^(|]+)\s*\(/g
+  let match
+  while ((match = joinPattern.exec(notes)) !== null) {
+    const name = match[1].trim()
+    if (name) joinedMembers.push(name)
+  }
+
+  return { roomName, members: [...originalMembers, ...joinedMembers] }
 }
 
 // ── Componentes pequeños ──────────────────────────────────────────────────────
