@@ -661,8 +661,13 @@ export default function Home() {
 
                   <div className="ctarow" style={{marginTop:12}}>
                     <div>
-                      <div className="pbig" style={{fontSize:22}}>${OPEN_PLAY_PRICE} <span style={{fontSize:13,fontWeight:400}}>/{lang==='es'?'persona':'person'}</span></div>
-                      <div className="pnote">{t.deposit}</div>
+                      <div className="pbig" style={{fontSize:22}}>
+                        ${OPEN_PLAY_PRICE * (players.length + 1)}
+                        <span style={{fontSize:13,fontWeight:400}}> · {players.length + 1} {lang==='es'?'persona':'person'}{players.length > 0 ? 's' : ''}</span>
+                      </div>
+                      <div style={{fontSize:11,color:'var(--gray-500)'}}>
+                        ${OPEN_PLAY_PRICE} × {players.length + 1} · {lang==='es'?'Anticipo':'Deposit'}: ${DEPOSIT} MXN
+                      </div>
                     </div>
                     <button className="rbtn" onClick={handleCreateRoom} disabled={submitting}>
                       {submitting ? <Spinner /> : <>{t.crearSala} ›</>}
