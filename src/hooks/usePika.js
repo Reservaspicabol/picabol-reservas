@@ -125,17 +125,27 @@ async function executeTool(toolName, toolInput) {
       }
       case 'create_court_booking': {
         const prices = { 60: 450, 90: 650, 120: 800, 150: 1050 }
+        // Normalize court — PIKA may send "Cancha 2", "2", or 2
+        let courtName = toolInput.court
+        if (typeof courtName === 'number') courtName = `Cancha ${courtName}`
+        else if (/^\d+$/.test(String(courtName).trim())) courtName = `Cancha ${courtName}`
+        else if (!String(courtName).toLowerCase().includes('cancha')) courtName = `Cancha ${courtName}`
+
         const result = await createPublicBooking({
           date: toolInput.date, hour: toolInput.hour, startMinute: toolInput.start_minute || 0,
-          court: toolInput.court, duration: toolInput.duration,
+          court: courtName, duration: toolInput.duration,
           name: toolInput.name, phone: toolInput.phone, email: toolInput.email
         })
+        const totalPrice = prices[toolInput.duration] || 450
         return {
           success: true, booking_id: result.id,
           reference: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
-          court: toolInput.court, date: toolInput.date,
+          court: courtName, date: toolInput.date,
           time: `${String(toolInput.hour).padStart(2,'0')}:${String(toolInput.start_minute||0).padStart(2,'0')}`,
-          duration_min: toolInput.duration, price_mxn: prices[toolInput.duration] || 450
+          duration_min: toolInput.duration,
+          total_price_mxn: totalPrice,
+          deposit_mxn: 50,
+          balance_at_arrival_mxn: totalPrice - 50,
         }
       }
       case 'create_open_play_room': {
@@ -176,13 +186,23 @@ async function executeTool(toolName, toolInput) {
 
 const SYSTEM_PROMPT = `Eres PIKA, la asistente inteligente de PICABOL en Cancun, Mexico.
 
-PRECIOS:
-- Cancha privada: 60min=$450, 90min=$650, 2hrs=$800, 2.5hrs=$1,050 MXN
-- Open Play: $250 MXN por persona, 3 horas
-- Deposito garantia: $50 MXN, tolerancia 10 min
-- Cancelacion: hasta 2 horas antes
+PRECIOS (precio total — el anticipo de $50 MXN esta INCLUIDO en el precio total):
+- Cancha privada 60min: $450 MXN total ($50 anticipo online + $400 al llegar)
+- Cancha privada 90min: $650 MXN total ($50 anticipo online + $600 al llegar)
+- Cancha privada 2hrs: $800 MXN total ($50 anticipo online + $750 al llegar)
+- Cancha privada 2.5hrs: $1,050 MXN total ($50 anticipo online + $1,000 al llegar)
+- Open Play: $250 MXN por persona total ($50 anticipo online + $200 al llegar)
 - Horario: 8am a 10pm todos los dias
-- 4 canchas disponibles: Cancha 1, 2, 3 y 4
+- Tolerancia: 10 min despues de la hora reservada
+- Cancelacion: hasta 2 horas antes sin penalizacion adicional
+
+IMPORTANTE AL INFORMAR PRECIOS:
+- SIEMPRE di el precio total primero, luego el desglose
+- Ejemplo correcto: "Son $450 MXN en total — $50 de anticipo online y $400 al llegar"
+- NUNCA digas "$450 + $50" porque el $50 ya esta incluido en el total
+
+CANCHAS: Cancha 1, Cancha 2, Cancha 3, Cancha 4
+Al usar create_court_booking, el campo court debe ser exactamente: "Cancha 1", "Cancha 2", "Cancha 3" o "Cancha 4"
 
 CAPACIDADES - usa las herramientas disponibles:
 1. check_availability: consulta slots libres en cualquier fecha y cancha
@@ -195,18 +215,18 @@ CAPACIDADES - usa las herramientas disponibles:
 FLUJO RESERVA:
 1. Pregunta fecha, hora preferida, cancha y duracion
 2. Verifica disponibilidad con check_availability
-3. Si disponible, pide nombre, celular y correo
-4. Confirma todo con el usuario
-5. Ejecuta create_court_booking
-6. Informa referencia y detalles
+3. Si disponible, pide nombre completo, celular y correo
+4. Resume: "Voy a reservar [Cancha X] el [fecha] a las [hora] por [duracion]. Total: $[precio] MXN ($50 anticipo + $[resto] al llegar). Tu nombre: [nombre]. ¿Confirmas?"
+5. Solo al recibir confirmacion, ejecuta create_court_booking
+6. Confirma con referencia y desglose de pago
 
 REGLAS:
 - Responde en el idioma del usuario (es/en)
 - Maximo 3 oraciones por respuesta, se conciso
 - SIEMPRE verifica disponibilidad antes de reservar
-- SIEMPRE confirma datos antes de ejecutar create_court_booking
+- SIEMPRE pide confirmacion antes de crear reserva
 - Solo PIKA modifica reservas existentes
-- Para fechas fuera de los 3 dias del calendario, usaras las herramientas normalmente`
+- Para fechas fuera de los 3 dias del calendario, usa las herramientas normalmente`
 
 async function callClaude(messages) {
   const resp = await fetch('/.netlify/functions/pika', {
