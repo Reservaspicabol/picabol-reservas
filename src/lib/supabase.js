@@ -10,17 +10,87 @@ export const PRICES = { 60: 400, 90: 600, 120: 750, 150: 950 }
 export const OPEN_PLAY_PRICE = 200
 export const DEPOSIT = 50
 
-// Convierte "Cancha 1" o 0 (index) -> numero 1,2,3,4
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function toCourtNum(court) {
   if (typeof court === 'number' && court <= 4) return court
   if (typeof court === 'string') return parseInt(court.replace(/\D/g, '')) || 1
   return 1
 }
 
-// Slots ocupados para una cancha y fecha
+// Verifica si una cancha específica está libre en una fecha/hora/duración
+async function isCourtFree(courtNum, dateStr, hour, startMinute, durationHours) {
+  const slotsNeeded = Math.ceil(durationHours * 2) // en medias horas
+
+  const [{ data: bookings }, { data: drills }, { data: tours }] = await Promise.all([
+    supabase.from('bookings')
+      .select('hour, start_minute, duration')
+      .eq('date', dateStr).eq('court', courtNum)
+      .in('status', ['reserved', 'playing']),
+    supabase.from('drills')
+      .select('hour')
+      .eq('date', dateStr).eq('court', courtNum)
+      .neq('status', 'cancelled'),
+    supabase.from('tour_bookings')
+      .select('hour')
+      .eq('date', dateStr).eq('court', courtNum)
+      .neq('status', 'cancelled'),
+  ])
+
+  const occupied = new Set()
+
+  ;(bookings || []).forEach(b => {
+    const slots = Math.ceil((b.duration || 1) * 2)
+    for (let i = 0; i < slots; i++) {
+      const mins = b.hour * 60 + (b.start_minute || 0) + i * 30
+      const h = Math.floor(mins / 60)
+      const m = mins % 60
+      occupied.add(`${h}:${m === 0 ? '00' : '30'}`)
+    }
+  })
+  ;(drills || []).forEach(d => {
+    occupied.add(`${d.hour}:00`)
+    occupied.add(`${d.hour}:30`)
+  })
+  ;(tours || []).forEach(t => {
+    for (let i = 0; i < 6; i++) { // tours duran 3hrs = 6 medias horas
+      const mins = t.hour * 60 + i * 30
+      const h = Math.floor(mins / 60)
+      const m = mins % 60
+      occupied.add(`${h}:${m === 0 ? '00' : '30'}`)
+    }
+  })
+
+  // Verificar que todos los slots necesarios estén libres
+  for (let i = 0; i < slotsNeeded; i++) {
+    const mins = hour * 60 + (startMinute || 0) + i * 30
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    const key = `${h}:${m === 0 ? '00' : '30'}`
+    if (occupied.has(key)) return false
+  }
+  return true
+}
+
+// Encuentra la primera cancha disponible para una fecha/hora/duración
+// Revisa las 4 canchas en orden y retorna el número de la primera libre
+export async function findAvailableCourt(dateStr, hour, startMinute, durationHours) {
+  // Revisar las 4 canchas en paralelo
+  const results = await Promise.all(
+    [1, 2, 3, 4].map(n => isCourtFree(n, dateStr, hour, startMinute, durationHours))
+  )
+  const availableIndex = results.findIndex(free => free)
+  if (availableIndex === -1) {
+    throw new Error('No hay canchas disponibles para ese horario. Por favor elige otro.')
+  }
+  return availableIndex + 1 // retorna 1, 2, 3 o 4
+}
+
+// ── Consultas públicas ────────────────────────────────────────────────────────
+
+// Slots ocupados para display (para mostrar en UI cuáles están tomados)
 export async function getOccupiedSlots(courtIndex, dateStr) {
   const courtNum = courtIndex + 1
-
   const [{ data: bookings }, { data: drills }, { data: tours }] = await Promise.all([
     supabase.from('bookings')
       .select('hour, start_minute, duration')
@@ -63,11 +133,15 @@ export async function getOpenPlayRooms(dateStr) {
   return data || []
 }
 
-// Crear reserva cancha privada
-export async function createPublicBooking({ date, hour, startMinute, court, duration, name, phone, email }) {
-  const courtNum = toCourtNum(court)
-  const revenue = PRICES[duration] || 400
+// ── Creación de reservas ──────────────────────────────────────────────────────
+
+// Cancha privada — asigna automáticamente la primera cancha libre
+export async function createPublicBooking({ date, hour, startMinute, duration, name, phone, email }) {
   const durationHours = duration / 60
+  const revenue = PRICES[duration] || 400
+
+  // Buscar primera cancha disponible
+  const courtNum = await findAvailableCourt(date, hour, startMinute || 0, durationHours)
 
   const { data, error } = await supabase
     .from('bookings')
@@ -92,16 +166,18 @@ export async function createPublicBooking({ date, hour, startMinute, court, dura
     .single()
 
   if (error) throw error
-  return data
+  return { ...data, courtNum, courtName: `Cancha ${courtNum}` }
 }
 
-// Crear sala open play
-export async function createOpenPlayRoom({ date, hour, court, roomName, hostName, phone, email, members }) {
-  const courtNum = toCourtNum(court)
+// Crear sala open play — asigna automáticamente la primera cancha libre
+export async function createOpenPlayRoom({ date, hour, roomName, hostName, phone, email, members }) {
   const allMembers = [hostName, ...(members || [])]
   const peopleCount = allMembers.length
   const revenue = OPEN_PLAY_PRICE * peopleCount
   const membersStr = (members || []).join(', ')
+
+  // Buscar primera cancha disponible para 3 horas
+  const courtNum = await findAvailableCourt(date, hour, 0, 3)
 
   const { data, error } = await supabase
     .from('bookings')
@@ -127,7 +203,7 @@ export async function createOpenPlayRoom({ date, hour, court, roomName, hostName
     .single()
 
   if (error) throw error
-  return data
+  return { ...data, courtNum, courtName: `Cancha ${courtNum}` }
 }
 
 // Unirse a sala existente
@@ -144,7 +220,6 @@ export async function joinOpenPlayRoom(bookingId, newMemberName, phone, email) {
   const newRevenue = OPEN_PLAY_PRICE * newPeople
   const newNotes = `${current.notes} | +${newMemberName} (${phone}, ${email}) | SITIO WEB PUBLICO`
 
-  // Update notes_players JSON array for admin compatibility
   let players = []
   try { players = JSON.parse(current.notes_players || '[]') } catch { players = [] }
   players.push(newMemberName)
