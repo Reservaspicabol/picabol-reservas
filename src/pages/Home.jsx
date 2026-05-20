@@ -5,6 +5,7 @@ import {
   createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
+import { downloadBookingPDF } from '../hooks/useDownload'
 
 
 // ── Traducciones ──────────────────────────────────────────────────────────────
@@ -268,7 +269,7 @@ export default function Home() {
 
   useEffect(() => {
     loadOpenSlots()
-  }, [createDateIdx])
+  }, [createDateIdx, lang])
 
   async function loadSlots() {
     setLoadingSlots(true)
@@ -324,28 +325,19 @@ export default function Home() {
   }
 
   async function loadOpenSlots() {
-    setLoadingOpenSlots(true)
-    try {
-      // Check court 1 (index 0) for open play availability — open play uses any available court
-      const occupied = await getOccupiedSlots(0, dates[createDateIdx].iso)
-      setOpenOccupiedSlots(occupied)
-      // Auto-select first available slot
-      const now = new Date()
-      const isToday = createDateIdx === 0
-      const nowMins = now.getHours() * 60 + now.getMinutes()
-      for (let h = 8; h <= 19; h++) { // max 19:00 open play
-        const slotMins = h * 60
-        if (isToday && slotMins < nowMins + 120) continue
-        if (!occupied.has(`${h}:00`)) {
-          setSalaHour(`${h}:00`)
-          break
-        }
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoadingOpenSlots(false)
+    // Open Play no requiere cancha específica — el admin asigna al llegar
+    // Solo calculamos los horarios válidos según hora actual
+    const now = new Date()
+    const isToday = createDateIdx === 0
+    const nowMins = now.getHours() * 60 + now.getMinutes()
+    // Auto-select first valid slot
+    for (let h = 8; h <= 19; h++) {
+      const slotMins = h * 60
+      if (isToday && slotMins < nowMins + 120) continue
+      setSalaHour(`${h}:00`)
+      break
     }
+    setOpenOccupiedSlots(new Set()) // no bloqueamos horarios para open play
   }
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -364,21 +356,21 @@ export default function Home() {
       const [h, m] = selSlot.split(':').map(Number)
       const result = await createPublicBooking({
         date: dates[selDateIdx].iso, hour: h, startMinute: m,
-        court: COURTS[selCourt], duration: selDur,
-        name: bkName, phone: bkPhone, email: bkEmail,
+        duration: selDur, name: bkName, phone: bkPhone, email: bkEmail,
       })
       setSuccess({
         ref: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
         type: 'cancha',
         details: {
           name: bkName, phone: bkPhone, email: bkEmail,
-          court: COURTS[selCourt], date: dates[selDateIdx].iso,
+          court: result.courtName || `Cancha ${result.court}`,
+          date: dates[selDateIdx].iso,
           time: selSlot, duration: selDur, price: PRICES[selDur],
         }
       })
     } catch (e) {
       console.error(e)
-      alert(lang === 'es' ? `Error al crear la reserva: ${e.message}` : `Booking error: ${e.message}`)
+      alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
     } finally {
       setSubmitting(false)
     }
@@ -394,16 +386,17 @@ export default function Home() {
       const [h] = salaHour.split(':').map(Number)
       const result = await createOpenPlayRoom({
         date: dates[createDateIdx].iso, hour: h,
-        court: COURTS[0], roomName: salaName,
-        hostName: salaHost, phone: salaTel,
-        email: salaEmail, members: players,
+        roomName: salaName, hostName: salaHost,
+        phone: salaTel, email: salaEmail, members: players,
       })
       setSuccess({
         ref: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
         type: 'open',
         details: {
           name: salaHost, phone: salaTel, email: salaEmail,
-          roomName: salaName, date: dates[createDateIdx].iso,
+          roomName: salaName,
+          court: result.courtName || `Cancha ${result.court}`,
+          date: dates[createDateIdx].iso,
           time: salaHour, price: OPEN_PLAY_PRICE,
         }
       })
@@ -820,7 +813,7 @@ export default function Home() {
                   {renderDateStrip(createDateIdx, i => { setCreateDateIdx(i) }, 'crds')}
                   <p className="slbl">{t.hora}</p>
                   {loadingOpenSlots ? (
-                    <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)',fontSize:12}}>Consultando disponibilidad...</span></div>
+                    <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)',fontSize:12}}>Consultando...</span></div>
                   ) : (
                     <div className="slots-wrap">
                       {(() => {
@@ -1018,6 +1011,7 @@ export default function Home() {
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>⏱ {success.details.duration} min · <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong></div>
                 </> : <>
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🏓 {success.details.roomName}</div>
+                  {success.details.court && <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🎾 {success.details.court}</div>}
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>📅 {success.details.date} · {success.details.time}</div>
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>💰 <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong> {lang==='es'?'por persona':'per person'}</div>
                 </>}
@@ -1028,7 +1022,21 @@ export default function Home() {
             🔒 {lang==='es'?'Depósito $50 MXN · 10 min de tolerancia para llegar':'$50 MXN deposit · 10 min grace period'}
           </div>
           <p className="ss">{t.successSub}</p>
-          <button className="dis" onClick={resetSuccess}>{t.backHome}</button>
+          <div style={{display:'flex',gap:10,marginTop:4}}>
+            <button
+              onClick={() => downloadBookingPDF(success, lang)}
+              style={{
+                background:'var(--lime)',color:'var(--green)',border:'none',
+                borderRadius:'var(--rs)',padding:'10px 20px',
+                fontFamily:'var(--font-d)',fontSize:16,fontWeight:800,
+                letterSpacing:'1px',cursor:'pointer',display:'flex',
+                alignItems:'center',gap:6
+              }}
+            >
+              ⬇ {lang==='es'?'DESCARGAR COMPROBANTE':'DOWNLOAD RECEIPT'}
+            </button>
+            <button className="dis" onClick={resetSuccess}>{t.backHome}</button>
+          </div>
         </div>
       )}
     </div>
