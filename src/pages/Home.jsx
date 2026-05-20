@@ -5,6 +5,7 @@ import {
   createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
+import { initiateStripeCheckout, checkStripeReturn } from '../hooks/useStripe'
 
 
 // ── Traducciones ──────────────────────────────────────────────────────────────
@@ -39,11 +40,11 @@ const T = {
     joinTitle: 'UNIRSE A SALA',
     joinBtn: 'UNIRME Y GARANTIZAR ESPACIO',
     sideTitle: 'SALAS OPEN PLAY',
-    chatTitle: 'PIKA · ASISTENTE 24/7',
+    chatTitle: 'PICA · ASISTENTE 24/7',
     chatSub: 'Acceso al calendario completo · Puede hacer reservas',
-    chatWelcome: '¡Hola! 👋 Soy PIKA, tu asistente de PICABOL. Tengo acceso al calendario completo — puedo consultarte disponibilidad en cualquier fecha y hacer reservas por ti. ¿En qué te ayudo?',
+    chatWelcome: '¡Hola! 👋 Soy PICA, tu asistente de PICABOL. Tengo acceso al calendario completo — puedo consultarte disponibilidad en cualquier fecha y hacer reservas por ti. ¿En qué te ayudo?',
     chatMod: '💡 ¿Ya tienes reserva? Dime y yo hago cualquier cambio por ti',
-    chatPlaceholder: 'Escribe a PIKA...',
+    chatPlaceholder: 'Escribe a PICA...',
     createRoomSide: '+ CREAR NUEVA SALA',
     visits: 'visitas hoy',
     available: 'Disponible',
@@ -60,7 +61,7 @@ const T = {
     months: ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'],
     joinHint: 'Selecciona una sala del panel derecho para unirte 👉',
     joinHintDate: 'Selecciona un día para ver las salas disponibles',
-    pikaFutureHint: '¿Quieres reservar en otra fecha? Escríbele a PIKA — puede revisar el calendario y reservar en cualquier fecha disponible.',
+    pikaFutureHint: '¿Quieres reservar en otra fecha? Escríbele a PICA — puede revisar el calendario y reservar en cualquier fecha disponible.',
     modalHost: 'Titular',
     modalPlayers: 'Integrantes actuales',
     modalGuar: 'Garantiza tu espacio · $50 MXN',
@@ -96,11 +97,11 @@ const T = {
     joinTitle: 'JOIN ROOM',
     joinBtn: 'JOIN & SECURE MY SPOT',
     sideTitle: 'OPEN PLAY ROOMS',
-    chatTitle: 'PIKA · 24/7 ASSISTANT',
+    chatTitle: 'PICA · 24/7 ASSISTANT',
     chatSub: 'Full calendar access · Can make bookings',
-    chatWelcome: 'Hi! 👋 I\'m PIKA, your PICABOL assistant. I have full calendar access — I can check availability on any date and make bookings for you. How can I help?',
+    chatWelcome: 'Hi! 👋 I\'m PICA, your PICABOL assistant. I have full calendar access — I can check availability on any date and make bookings for you. How can I help?',
     chatMod: '💡 Already have a booking? Tell me and I\'ll make any changes for you',
-    chatPlaceholder: 'Message PIKA...',
+    chatPlaceholder: 'Message PICA...',
     createRoomSide: '+ CREATE NEW ROOM',
     visits: 'visits today',
     available: 'Available',
@@ -117,7 +118,7 @@ const T = {
     months: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
     joinHint: 'Select a room from the right panel to join 👉',
     joinHintDate: 'Select a day to see available rooms',
-    pikaFutureHint: 'Want to book for a different date? Message PIKA — she can check the calendar and book any available date.',
+    pikaFutureHint: 'Want to book for a different date? Message PICA — she can check the calendar and book any available date.',
     modalHost: 'Host',
     modalPlayers: 'Current players',
     modalGuar: 'Secure your spot · $50 MXN',
@@ -248,6 +249,20 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
+  // Handle return from Stripe payment
+  useEffect(() => {
+    const stripeReturn = checkStripeReturn()
+    if (stripeReturn) {
+      handlePostPayment(stripeReturn)
+    }
+    // Handle cancelled payment
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('cancelled') === 'true') {
+      window.history.replaceState({}, '', '/')
+      sessionStorage.removeItem('pending_booking')
+    }
+  }, [])
+
   useEffect(() => {
     loadSlots()
     loadAllCourtsAvailability()
@@ -293,9 +308,9 @@ export default function Home() {
       )
       const availability = results.map(occupied => {
         // Check if there's at least one available slot in the future
-        for (let h = 8; h <= 22; h++) {
+        for (let h = 8; h <= 21; h++) {
           for (const m of ['00', '30']) {
-            if (h === 22 && m === '30') continue
+            if (h === 21 && m === '30') continue
             const slotMins = h * 60 + (m === '30' ? 30 : 0)
             if (isToday && slotMins < nowMins + 120) continue
             if (!occupied.has(`${h}:${m}`)) return true
@@ -333,7 +348,7 @@ export default function Home() {
       const now = new Date()
       const isToday = createDateIdx === 0
       const nowMins = now.getHours() * 60 + now.getMinutes()
-      for (let h = 8; h <= 22; h++) {
+      for (let h = 8; h <= 19; h++) { // max 19:00 open play
         const slotMins = h * 60
         if (isToday && slotMins < nowMins + 120) continue
         if (!occupied.has(`${h}:00`)) {
@@ -354,6 +369,57 @@ export default function Home() {
     document.documentElement.lang = l
   }
 
+  // ── Post-payment handler (después de redirigir de Stripe) ─────────────────
+  async function handlePostPayment({ type, bookingData }) {
+    setSubmitting(true)
+    try {
+      let result
+      if (type === 'cancha') {
+        result = await createPublicBooking(bookingData)
+        setSuccess({
+          ref: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
+          type: 'cancha',
+          details: {
+            name: bookingData.name, phone: bookingData.phone, email: bookingData.email,
+            court: bookingData.court, date: bookingData.date,
+            time: `${String(bookingData.hour).padStart(2,'0')}:${String(bookingData.startMinute||0).padStart(2,'0')}`,
+            duration: bookingData.duration, price: PRICES[bookingData.duration],
+          }
+        })
+      } else if (type === 'open_create') {
+        result = await createOpenPlayRoom(bookingData)
+        setSuccess({
+          ref: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
+          type: 'open',
+          details: {
+            name: bookingData.hostName, phone: bookingData.phone, email: bookingData.email,
+            roomName: bookingData.roomName, date: bookingData.date,
+            time: `${String(bookingData.hour).padStart(2,'0')}:00`, price: OPEN_PLAY_PRICE,
+          }
+        })
+        setTimeout(() => loadRooms(sideDateIdx), 500)
+      } else if (type === 'open_join') {
+        await joinOpenPlayRoom(bookingData.bookingId, bookingData.name, bookingData.phone, bookingData.email)
+        setSuccess({
+          ref: 'OPL-' + Date.now().toString().slice(-6),
+          type: 'open',
+          details: {
+            name: bookingData.name, phone: bookingData.phone, email: bookingData.email,
+            roomName: bookingData.roomName, date: bookingData.date,
+            time: bookingData.time, price: OPEN_PLAY_PRICE,
+          }
+        })
+        setTimeout(() => loadRooms(sideDateIdx), 300)
+      }
+      sessionStorage.removeItem('pending_booking')
+    } catch (e) {
+      console.error('Post payment error:', e)
+      alert(lang === 'es' ? `Error al crear la reserva: ${e.message}` : `Booking error: ${e.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleReserve() {
     if (!bkName || !bkPhone || !bkEmail || !selSlot) {
       alert(lang === 'es' ? 'Completa todos los campos y selecciona un horario' : 'Fill all fields and select a time slot')
@@ -362,36 +428,17 @@ export default function Home() {
     setSubmitting(true)
     try {
       const [h, m] = selSlot.split(':').map(Number)
-      await createPublicBooking({
-        date: dates[selDateIdx].iso,
-        hour: h,
-        startMinute: m,
-        court: COURTS[selCourt],
-        duration: selDur,
-        name: bkName,
-        phone: bkPhone,
-        email: bkEmail,
-      })
-      setSuccess({
-        ref: formatRef(),
+      await initiateStripeCheckout({
         type: 'cancha',
-        details: {
-          name: bkName,
-          phone: bkPhone,
-          email: bkEmail,
-          court: COURTS[selCourt],
-          date: dates[selDateIdx].iso,
-          time: selSlot,
-          duration: selDur,
-          price: PRICES[selDur],
+        bookingData: {
+          date: dates[selDateIdx].iso, hour: h, startMinute: m,
+          court: COURTS[selCourt], duration: selDur,
+          name: bkName, phone: bkPhone, email: bkEmail,
         }
       })
     } catch (e) {
       console.error(e)
-      alert(lang === 'es'
-        ? `Error al crear la reserva: ${e.message || 'Intenta de nuevo'}` 
-        : `Booking error: ${e.message || 'Please try again'}`)
-    } finally {
+      alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
       setSubmitting(false)
     }
   }
@@ -404,39 +451,18 @@ export default function Home() {
     setSubmitting(true)
     try {
       const [h] = salaHour.split(':').map(Number)
-      await createOpenPlayRoom({
-        date: dates[createDateIdx].iso,
-        hour: h,
-        court: COURTS[0],
-        roomName: salaName,
-        hostName: salaHost,
-        phone: salaTel,
-        email: salaEmail,
-        members: players,
-      })
-      setSuccess({
-        ref: formatRef(),
-        type: 'open',
-        details: {
-          name: salaHost,
-          phone: salaTel,
-          email: salaEmail,
-          roomName: salaName,
-          date: dates[createDateIdx].iso,
-          time: salaHour,
-          members: [salaHost, ...players],
-          price: OPEN_PLAY_PRICE,
+      await initiateStripeCheckout({
+        type: 'open_create',
+        bookingData: {
+          date: dates[createDateIdx].iso, hour: h,
+          court: COURTS[0], roomName: salaName,
+          hostName: salaHost, phone: salaTel,
+          email: salaEmail, members: players,
         }
       })
-      setSideDateIdx(createDateIdx)
-      players.length > 0 && setPlayers([])
-      setTimeout(() => loadRooms(createDateIdx), 300)
     } catch (e) {
       console.error(e)
-      alert(lang === 'es'
-        ? `Error al crear la sala: ${e.message || 'Intenta de nuevo'}`
-        : `Error creating room: ${e.message || 'Please try again'}`)
-    } finally {
+      alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
       setSubmitting(false)
     }
   }
@@ -448,29 +474,20 @@ export default function Home() {
     }
     setSubmitting(true)
     try {
-      await joinOpenPlayRoom(joinRoom.id, joinName, joinPhone, joinEmail)
       const { roomName } = extractRoomInfo(joinRoom)
-      setJoinRoom(null)
-      setSuccess({
-        ref: formatRef(),
-        type: 'open',
-        details: {
-          name: joinName,
-          phone: joinPhone,
-          email: joinEmail,
+      await initiateStripeCheckout({
+        type: 'open_join',
+        bookingData: {
+          bookingId: joinRoom.id,
+          name: joinName, phone: joinPhone, email: joinEmail,
           roomName,
           date: dates[sideDateIdx].iso,
           time: `${String(joinRoom.hour).padStart(2,'0')}:00`,
-          price: OPEN_PLAY_PRICE,
         }
       })
-      setTimeout(() => loadRooms(sideDateIdx), 300)
     } catch (e) {
       console.error(e)
-      alert(lang === 'es'
-        ? `Error al unirse: ${e.message || 'Intenta de nuevo'}`
-        : `Error joining: ${e.message || 'Please try again'}`)
-    } finally {
+      alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
       setSubmitting(false)
     }
   }
@@ -518,17 +535,16 @@ export default function Home() {
     if (loadingSlots) return <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)'}}>Consultando disponibilidad...</span></div>
     const now = new Date()
     const isToday = selDateIdx === 0
-    const minHour = isToday ? now.getHours() + 2 + (now.getMinutes() > 0 ? 1 : 0) : 0
     const slots = []
     let hasAvailable = false
-    for (let h = 8; h <= 22; h++) {
+    for (let h = 8; h <= 21; h++) { // max 21:00 — cierra a las 10pm, min 1hr
       for (const m of ['00', '30']) {
-        if (h === 22 && m === '30') continue
+        if (h === 21 && m === '30') continue // max 21:00
         const slotMins = h * 60 + (m === '30' ? 30 : 0)
         const nowMins = now.getHours() * 60 + now.getMinutes()
-        const isPast = isToday && slotMins < nowMins + 120 // 2 horas de diferencia
+        const isPast = isToday && slotMins < nowMins + 120
         const taken = occupiedSlots.has(`${h}:${m}`)
-        if (isPast || taken) continue // solo mostramos disponibles
+        if (isPast || taken) continue
         hasAvailable = true
         const key = `${h}:${m}`
         slots.push(
@@ -544,7 +560,7 @@ export default function Home() {
     }
     if (!hasAvailable) return (
       <p style={{fontSize:12,color:'var(--gray-500)',fontStyle:'italic',padding:'8px 0'}}>
-        {lang==='es' ? 'No hay horarios disponibles para este día. Prueba otro día o escríbele a PIKA.' : 'No available slots for this day. Try another day or message PIKA.'}
+        {lang==='es' ? 'No hay horarios disponibles para este día. Prueba otro día o escríbele a PICA.' : 'No available slots for this day. Try another day or message PICA.'}
       </p>
     )
     return slots
@@ -858,7 +874,7 @@ export default function Home() {
                         const nowMins = now.getHours() * 60 + now.getMinutes()
                         const slots = []
                         let hasAny = false
-                        for (let h = 8; h <= 22; h++) {
+                        for (let h = 8; h <= 19; h++) { // max 19:00 — 3hrs, cierra 10pm
                           const slotMins = h * 60
                           if (isToday && slotMins < nowMins + 120) continue
                           if (openOccupiedSlots.has(`${h}:00`)) continue
@@ -915,14 +931,14 @@ export default function Home() {
             {t.createRoomSide}
           </button>
 
-          {/* PIKA */}
+          {/* PICA */}
           <div className="stitle"><LiveDot/>{t.chatTitle}</div>
           <div className="cbox">
             <div className="chdr">
               <div className="cav">P</div>
               <div className="chinfo">
                 <div className="chname" style={{display:'flex',alignItems:'center',gap:6}}>
-                  PIKA
+                  PICA
                   {/* Gatito kawaii */}
                   <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <ellipse cx="11" cy="13" rx="7" ry="6" fill="#1a1916"/>
