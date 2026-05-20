@@ -98,7 +98,8 @@ export async function createPublicBooking({ date, hour, startMinute, court, dura
 // Crear sala open play
 export async function createOpenPlayRoom({ date, hour, court, roomName, hostName, phone, email, members }) {
   const courtNum = toCourtNum(court)
-  const peopleCount = (members || []).length + 1
+  const allMembers = [hostName, ...(members || [])]
+  const peopleCount = allMembers.length
   const revenue = OPEN_PLAY_PRICE * peopleCount
   const membersStr = (members || []).join(', ')
 
@@ -112,6 +113,7 @@ export async function createOpenPlayRoom({ date, hour, court, roomName, hostName
       modality: 'openplay',
       name: hostName,
       notes: `Sala: ${roomName} | Miembros: ${membersStr} | Tel: ${phone} | Email: ${email} | SITIO WEB PUBLICO`,
+      notes_players: JSON.stringify(allMembers),
       status: 'reserved',
       revenue,
       duration: 3,
@@ -132,7 +134,7 @@ export async function createOpenPlayRoom({ date, hour, court, roomName, hostName
 export async function joinOpenPlayRoom(bookingId, newMemberName, phone, email) {
   const { data: current, error: fetchErr } = await supabase
     .from('bookings')
-    .select('people, notes, revenue')
+    .select('people, notes, revenue, notes_players')
     .eq('id', bookingId)
     .single()
 
@@ -142,9 +144,19 @@ export async function joinOpenPlayRoom(bookingId, newMemberName, phone, email) {
   const newRevenue = OPEN_PLAY_PRICE * newPeople
   const newNotes = `${current.notes} | +${newMemberName} (${phone}, ${email}) | SITIO WEB PUBLICO`
 
+  // Update notes_players JSON array for admin compatibility
+  let players = []
+  try { players = JSON.parse(current.notes_players || '[]') } catch { players = [] }
+  players.push(newMemberName)
+
   const { error } = await supabase
     .from('bookings')
-    .update({ people: newPeople, revenue: newRevenue, notes: newNotes })
+    .update({
+      people: newPeople,
+      revenue: newRevenue,
+      notes: newNotes,
+      notes_players: JSON.stringify(players),
+    })
     .eq('id', bookingId)
 
   if (error) throw error
