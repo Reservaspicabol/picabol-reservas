@@ -6,8 +6,8 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 export const COURTS = ['Cancha 1', 'Cancha 2', 'Cancha 3', 'Cancha 4']
-export const PRICES = { 60: 450, 90: 650, 120: 800, 150: 1050 }
-export const OPEN_PLAY_PRICE = 250
+export const PRICES = { 60: 400, 90: 600, 120: 750, 150: 950 }
+export const OPEN_PLAY_PRICE = 200
 export const DEPOSIT = 50
 
 // Convierte "Cancha 1" o 0 (index) -> numero 1,2,3,4
@@ -66,7 +66,7 @@ export async function getOpenPlayRooms(dateStr) {
 // Crear reserva cancha privada
 export async function createPublicBooking({ date, hour, startMinute, court, duration, name, phone, email }) {
   const courtNum = toCourtNum(court)
-  const revenue = PRICES[duration] || 450
+  const revenue = PRICES[duration] || 400
   const durationHours = duration / 60
 
   const { data, error } = await supabase
