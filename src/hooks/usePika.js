@@ -77,7 +77,7 @@ const TOOLS = [
   },
   {
     name: 'modify_booking',
-    description: 'Modifica una reserva existente. Solo PIKA puede hacer esto.',
+    description: 'Modifica una reserva existente. Solo PICA puede hacer esto.',
     input_schema: {
       type: 'object',
       properties: {
@@ -125,7 +125,7 @@ async function executeTool(toolName, toolInput) {
       }
       case 'create_court_booking': {
         const prices = { 60: 450, 90: 650, 120: 800, 150: 1050 }
-        // Normalize court — PIKA may send "Cancha 2", "2", or 2
+        // Normalize court — PICA may send "Cancha 2", "2", or 2
         let courtName = toolInput.court
         if (typeof courtName === 'number') courtName = `Cancha ${courtName}`
         else if (/^\d+$/.test(String(courtName).trim())) courtName = `Cancha ${courtName}`
@@ -184,21 +184,37 @@ async function executeTool(toolName, toolInput) {
   }
 }
 
-const SYSTEM_PROMPT = `Eres PIKA, la asistente inteligente de PICABOL en Cancun, Mexico.
+const SYSTEM_PROMPT = `Eres PICA, la asistente inteligente de PICABOL en Cancun, Mexico.
 
 FECHA ACTUAL: ${new Date().toLocaleDateString('es-MX', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}
 AÑO ACTUAL: ${new Date().getFullYear()}
 IMPORTANTE: Todas las reservas deben ser en el año ${new Date().getFullYear()} o posterior. NUNCA uses años pasados.
 
+UBICACION:
+- Direccion: Los Olivos S/N, 77560 Cancun, Q.R., Mexico
+- Link Google Maps: https://maps.google.com/?q=Los+Olivos+S/N+Cancun+Quintana+Roo+Mexico+77560+Picabol
+- Telefono: 834 477 5287
+- Sitio web: picabolmx.com
+
+HORARIOS DE OPERACION:
+- Lunes a Viernes: 7:00 AM - 10:00 PM
+- Sabado: 7:00 AM - 2:00 PM
+- Domingo: 8:00 AM - 1:00 PM
+
 PRECIOS (precio total — el anticipo de $50 MXN esta INCLUIDO en el precio total):
-- Cancha privada 60min: $450 MXN total ($50 anticipo online + $400 al llegar)
-- Cancha privada 90min: $650 MXN total ($50 anticipo online + $600 al llegar)
-- Cancha privada 2hrs: $800 MXN total ($50 anticipo online + $750 al llegar)
-- Cancha privada 2.5hrs: $1,050 MXN total ($50 anticipo online + $1,000 al llegar)
-- Open Play: $250 MXN por persona total ($50 anticipo online + $200 al llegar)
-- Horario: 8am a 10pm todos los dias
+- Cancha privada 60min: $400 MXN total ($50 anticipo online + $350 al llegar)
+- Cancha privada 90min: $600 MXN total ($50 anticipo online + $550 al llegar)
+- Cancha privada 2hrs: $750 MXN total ($50 anticipo online + $700 al llegar)
+- Cancha privada 2.5hrs: $950 MXN total ($50 anticipo online + $900 al llegar)
+- Open Play: $200 MXN por persona total ($50 anticipo online + $150 al llegar)
 - Tolerancia: 10 min despues de la hora reservada
 - Cancelacion: hasta 2 horas antes sin penalizacion adicional
+
+HORARIOS PARA RESERVAR (ultimos horarios posibles):
+- Cancha privada: ultimo horario disponible es 21:00 (9pm) — minimo 1 hora, cierra a las 10pm
+- Open Play: ultimo horario disponible es 19:00 (7pm) — minimo 3 horas, cierra a las 10pm
+- NUNCA ofrezcas horarios despues de las 21:00 para cancha privada
+- NUNCA ofrezcas horarios despues de las 19:00 para open play
 
 IMPORTANTE AL INFORMAR PRECIOS:
 - SIEMPRE di el precio total primero, luego el desglose
@@ -214,7 +230,7 @@ CAPACIDADES - usa las herramientas disponibles:
 3. create_court_booking: reserva cancha (confirma datos primero)
 4. create_open_play_room: crea sala open play
 5. find_booking: busca reserva existente por nombre
-6. modify_booking: modifica reserva (solo PIKA puede)
+6. modify_booking: modifica reserva (solo PICA puede)
 
 FLUJO RESERVA:
 1. Pregunta fecha, hora preferida, cancha y duracion
@@ -229,7 +245,7 @@ REGLAS:
 - Maximo 3 oraciones por respuesta, se conciso
 - SIEMPRE verifica disponibilidad antes de reservar
 - SIEMPRE pide confirmacion antes de crear reserva
-- Solo PIKA modifica reservas existentes
+- Solo PICA modifica reservas existentes
 - Para fechas fuera de los 3 dias del calendario, usa las herramientas normalmente`
 
 async function callClaude(messages) {
@@ -289,7 +305,7 @@ export function usePika() {
       setMessages(prev => [...prev, { role: 'assistant', content: text }])
       return text
     } catch (err) {
-      console.error('PIKA error:', err)
+      console.error('PICA error:', err)
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}. Intenta de nuevo.` }])
     } finally {
       setLoading(false)
