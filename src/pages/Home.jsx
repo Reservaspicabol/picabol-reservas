@@ -6,6 +6,7 @@ import {
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
 import { downloadBookingPDF } from '../hooks/useDownload'
+import { initiateStripeCheckout, checkStripeReturn, checkStripeCancelled } from '../hooks/useStripe'
 
 
 // ── Traducciones ──────────────────────────────────────────────────────────────
@@ -249,6 +250,15 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
+  // Detectar retorno de Stripe
+  useEffect(() => {
+    const stripeReturn = checkStripeReturn()
+    if (stripeReturn) handlePostPayment(stripeReturn)
+    if (checkStripeCancelled()) {
+      alert(lang === 'es' ? 'Pago cancelado. Tu reserva no fue creada.' : 'Payment cancelled. Your booking was not created.')
+    }
+  }, [])
+
   useEffect(() => {
     loadSlots()
     loadAllCourtsAvailability()
@@ -346,6 +356,57 @@ export default function Home() {
     document.documentElement.lang = l
   }
 
+  // ── Post-payment: crea reserva en Supabase tras pago exitoso ────────────────
+  async function handlePostPayment({ type, bookingData }) {
+    setSubmitting(true)
+    try {
+      if (type === 'cancha') {
+        const result = await createPublicBooking(bookingData)
+        setSuccess({
+          ref: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
+          type: 'cancha',
+          details: {
+            name: bookingData.name, phone: bookingData.phone, email: bookingData.email,
+            court: result.courtName || `Cancha ${result.court}`,
+            date: bookingData.date, time: bookingData.time,
+            duration: bookingData.duration, price: PRICES[bookingData.duration],
+          }
+        })
+      } else if (type === 'open_create') {
+        const result = await createOpenPlayRoom(bookingData)
+        setSuccess({
+          ref: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
+          type: 'open',
+          details: {
+            name: bookingData.hostName, phone: bookingData.phone, email: bookingData.email,
+            roomName: bookingData.roomName,
+            court: result.courtName || `Cancha ${result.court}`,
+            date: bookingData.date, time: bookingData.time, price: OPEN_PLAY_PRICE,
+          }
+        })
+        setTimeout(() => loadRooms(createDateIdx), 500)
+      } else if (type === 'open_join') {
+        await joinOpenPlayRoom(bookingData.bookingId, bookingData.name, bookingData.phone, bookingData.email)
+        setSuccess({
+          ref: 'OPL-' + Date.now().toString().slice(-6),
+          type: 'open',
+          details: {
+            name: bookingData.name, phone: bookingData.phone, email: bookingData.email,
+            roomName: bookingData.roomName, date: bookingData.date,
+            time: bookingData.time, price: OPEN_PLAY_PRICE,
+          }
+        })
+        setTimeout(() => loadRooms(sideDateIdx), 300)
+      }
+      sessionStorage.removeItem('pending_booking')
+    } catch (e) {
+      console.error(e)
+      alert(lang === 'es' ? `Error al crear reserva: ${e.message}` : `Booking error: ${e.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleReserve() {
     if (!bkName || !bkPhone || !bkEmail || !selSlot) {
       alert(lang === 'es' ? 'Completa todos los campos y selecciona un horario' : 'Fill all fields and select a time slot')
@@ -354,24 +415,16 @@ export default function Home() {
     setSubmitting(true)
     try {
       const [h, m] = selSlot.split(':').map(Number)
-      const result = await createPublicBooking({
-        date: dates[selDateIdx].iso, hour: h, startMinute: m,
-        duration: selDur, name: bkName, phone: bkPhone, email: bkEmail,
-      })
-      setSuccess({
-        ref: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
+      await initiateStripeCheckout({
         type: 'cancha',
-        details: {
-          name: bkName, phone: bkPhone, email: bkEmail,
-          court: result.courtName || `Cancha ${result.court}`,
-          date: dates[selDateIdx].iso,
-          time: selSlot, duration: selDur, price: PRICES[selDur],
+        bookingData: {
+          date: dates[selDateIdx].iso, hour: h, startMinute: m,
+          duration: selDur, name: bkName, phone: bkPhone, email: bkEmail,
+          time: selSlot,
         }
       })
     } catch (e) {
-      console.error(e)
       alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
-    } finally {
       setSubmitting(false)
     }
   }
@@ -384,29 +437,17 @@ export default function Home() {
     setSubmitting(true)
     try {
       const [h] = salaHour.split(':').map(Number)
-      const result = await createOpenPlayRoom({
-        date: dates[createDateIdx].iso, hour: h,
-        roomName: salaName, hostName: salaHost,
-        phone: salaTel, email: salaEmail, members: players,
-      })
-      setSuccess({
-        ref: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
-        type: 'open',
-        details: {
-          name: salaHost, phone: salaTel, email: salaEmail,
-          roomName: salaName,
-          court: result.courtName || `Cancha ${result.court}`,
-          date: dates[createDateIdx].iso,
-          time: salaHour, price: OPEN_PLAY_PRICE,
+      await initiateStripeCheckout({
+        type: 'open_create',
+        bookingData: {
+          date: dates[createDateIdx].iso, hour: h,
+          roomName: salaName, hostName: salaHost,
+          phone: salaTel, email: salaEmail, members: players,
+          time: salaHour,
         }
       })
-      setSideDateIdx(createDateIdx)
-      setPlayers([])
-      setTimeout(() => loadRooms(createDateIdx), 300)
     } catch (e) {
-      console.error(e)
-      alert(lang === 'es' ? `Error al crear la sala: ${e.message}` : `Error creating room: ${e.message}`)
-    } finally {
+      alert(lang === 'es' ? `Error: ${e.message}` : `Error: ${e.message}`)
       setSubmitting(false)
     }
   }
@@ -419,19 +460,15 @@ export default function Home() {
     setSubmitting(true)
     try {
       const { roomName } = extractRoomInfo(joinRoom)
-      await joinOpenPlayRoom(joinRoom.id, joinName, joinPhone, joinEmail)
-      setJoinRoom(null)
-      setSuccess({
-        ref: 'OPL-' + Date.now().toString().slice(-6),
-        type: 'open',
-        details: {
-          name: joinName, phone: joinPhone, email: joinEmail,
+      await initiateStripeCheckout({
+        type: 'open_join',
+        bookingData: {
+          bookingId: joinRoom.id, name: joinName,
+          phone: joinPhone, email: joinEmail,
           roomName, date: dates[sideDateIdx].iso,
           time: `${String(joinRoom.hour).padStart(2,'0')}:00`,
-          price: OPEN_PLAY_PRICE,
         }
       })
-      setTimeout(() => loadRooms(sideDateIdx), 300)
     } catch (e) {
       console.error(e)
       alert(lang === 'es' ? `Error al unirse: ${e.message}` : `Error joining: ${e.message}`)
