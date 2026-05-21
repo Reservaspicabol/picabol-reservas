@@ -31,20 +31,20 @@ const TOOLS = [
   },
   {
     name: 'create_court_booking',
-    description: 'Crea una reserva de cancha privada. Solo usar cuando el usuario haya confirmado todos los datos.',
+    description: 'Crea una reserva de cancha privada. Si el usuario pidio una cancha especifica y esta disponible, incluyela. Si no especifico, omite el campo y el sistema asigna automaticamente.',
     input_schema: {
       type: 'object',
       properties: {
         date: { type: 'string' },
         hour: { type: 'number' },
         start_minute: { type: 'number', description: '0 o 30' },
-        court: { type: 'string', description: 'Cancha 1, 2, 3 o 4' },
+        preferred_court: { type: 'number', description: 'Numero de cancha preferida (1-4), solo si el usuario la pidio y esta disponible' },
         duration: { type: 'number', description: '60, 90, 120 o 150 minutos' },
         name: { type: 'string' },
         phone: { type: 'string' },
         email: { type: 'string' }
       },
-      required: ['date', 'hour', 'start_minute', 'court', 'duration', 'name', 'phone', 'email']
+      required: ['date', 'hour', 'start_minute', 'duration', 'name', 'phone', 'email']
     }
   },
   {
@@ -132,6 +132,7 @@ async function executeTool(toolName, toolInput) {
           duration: toolInput.duration, name: toolInput.name,
           phone: toolInput.phone, email: toolInput.email,
           time: `${String(toolInput.hour).padStart(2,'0')}:${String(toolInput.start_minute||0).padStart(2,'0')}`,
+          preferredCourt: toolInput.preferred_court || null,
         }
         try {
           const resp = await fetch('/.netlify/functions/stripe-checkout', {
@@ -180,9 +181,16 @@ async function executeTool(toolName, toolInput) {
       }
       case 'modify_booking': {
         const updates = {}
-        if (toolInput.new_hour !== undefined) updates.hour = toolInput.new_hour
-        if (toolInput.new_court) updates.court = toolInput.new_court
+        if (toolInput.new_hour !== undefined) updates.hour = parseInt(toolInput.new_hour)
+        if (toolInput.new_court) {
+          // Convert "Cancha 2" or "2" to number
+          const courtNum = typeof toolInput.new_court === 'number'
+            ? toolInput.new_court
+            : parseInt(String(toolInput.new_court).replace(/\D/g, '')) || 1
+          updates.court = courtNum
+        }
         if (toolInput.new_date) updates.date = toolInput.new_date
+        if (Object.keys(updates).length === 0) return { error: 'No se especificaron cambios' }
         const { error } = await supabase.from('bookings').update(updates).eq('id', toolInput.booking_id)
         if (error) throw error
         return { success: true, booking_id: toolInput.booking_id, changes: updates }
@@ -190,7 +198,7 @@ async function executeTool(toolName, toolInput) {
       default: return { error: `Tool ${toolName} not found` }
     }
   } catch (err) {
-    return { error: err.message || 'Error executing tool' }
+    return { error: err.message || 'Error al ejecutar herramienta' }
   }
 }
 
@@ -232,7 +240,9 @@ IMPORTANTE AL INFORMAR PRECIOS:
 - NUNCA digas "$450 + $50" porque el $50 ya esta incluido en el total
 
 CANCHAS: Cancha 1, Cancha 2, Cancha 3, Cancha 4
-Al usar create_court_booking, el campo court debe ser exactamente: "Cancha 1", "Cancha 2", "Cancha 3" o "Cancha 4"
+Si el usuario pide una cancha especifica, verifica disponibilidad con check_availability primero.
+Si esta libre, incluye preferred_court en create_court_booking.
+Si no esta libre, sugiere otra cancha disponible o diferente horario.
 
 CAPACIDADES - usa las herramientas disponibles:
 1. check_availability: consulta slots libres en cualquier fecha y cancha
@@ -256,7 +266,9 @@ REGLAS:
 - SIEMPRE verifica disponibilidad antes de reservar
 - SIEMPRE pide confirmacion antes de crear reserva
 - Al crear reserva o sala, se cobrara $50 MXN de anticipo via Stripe y se redirigira al pago
-- Al MODIFICAR una reserva (cambiar fecha/hora), NO se cobra nuevo anticipo — el ya pagado se respeta
+- Al MODIFICAR una reserva (cambiar fecha/hora/cancha), NO se cobra nuevo anticipo — el ya pagado se respeta
+- Si una herramienta retorna error o no puedes realizar una accion, responde EXACTAMENTE: "Te ofrezco una disculpa, esa acción aún no la aprendo a hacer correctamente. Te prometo aprender. Mientras tanto, [aquí puedes contactar a un humano que te ayude](https://wa.me/528344775287)"
+- NUNCA inventes soluciones, NUNCA des numeros de telefono sin el link de WhatsApp
 - Solo PICA modifica reservas existentes sin cobro adicional
 - Para fechas fuera de los 3 dias del calendario, usa las herramientas normalmente`
 
