@@ -135,13 +135,19 @@ export async function getOpenPlayRooms(dateStr) {
 
 // ── Creación de reservas ──────────────────────────────────────────────────────
 
-// Cancha privada — asigna automáticamente la primera cancha libre
-export async function createPublicBooking({ date, hour, startMinute, duration, name, phone, email }) {
+// Cancha privada — asigna automáticamente o usa preferencia si está libre
+export async function createPublicBooking({ date, hour, startMinute, duration, name, phone, email, preferredCourt }) {
   const durationHours = duration / 60
   const revenue = PRICES[duration] || 400
 
-  // Buscar primera cancha disponible
-  const courtNum = await findAvailableCourt(date, hour, startMinute || 0, durationHours)
+  let courtNum
+  if (preferredCourt) {
+    // Verificar si la cancha preferida está libre
+    const free = await isCourtFree(preferredCourt, date, hour, startMinute || 0, durationHours)
+    courtNum = free ? preferredCourt : await findAvailableCourt(date, hour, startMinute || 0, durationHours)
+  } else {
+    courtNum = await findAvailableCourt(date, hour, startMinute || 0, durationHours)
+  }
 
   const { data, error } = await supabase
     .from('bookings')
