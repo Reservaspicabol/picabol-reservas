@@ -136,11 +136,13 @@ function getDates(lang) {
   return [0, 1, 2].map(i => {
     const d = new Date(now)
     d.setDate(d.getDate() + i)
+    // Usar fecha local, NO toISOString() que usa UTC y puede dar día +1
+    const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
     return {
       label: t.days[i],
       num: d.getDate(),
       mon: t.months[d.getMonth()],
-      iso: d.toISOString().split('T')[0]
+      iso
     }
   })
 }
@@ -203,6 +205,8 @@ export default function Home() {
   const [opDateIdx, setOpDateIdx] = useState(0)
   const [createDateIdx, setCreateDateIdx] = useState(0)
   const [sideDateIdx, setSideDateIdx] = useState(0)
+  const [allRooms, setAllRooms] = useState([])
+  const [sideFilter, setSideFilter] = useState('all') // 'all' | 0 | 1 | 2
 
   // Cancha privada
   const [selCourt, setSelCourt] = useState(0)
@@ -325,8 +329,23 @@ export default function Home() {
     setLoadingRooms(true)
     try {
       const idx = dateIdx !== undefined ? dateIdx : sideDateIdx
+      // Load selected day rooms
       const rooms = await getOpenPlayRooms(dates[idx]?.iso || dates[0].iso)
       setOpenRooms(rooms)
+      // Load all 3 days for the side panel
+      const [r0, r1, r2] = await Promise.all(
+        dates.map(d => getOpenPlayRooms(d.iso))
+      )
+      // Merge, add dateIdx, sort by date+hour
+      const merged = [
+        ...r0.map(r => ({...r, _dateIdx: 0, _dateIso: dates[0].iso})),
+        ...r1.map(r => ({...r, _dateIdx: 1, _dateIso: dates[1].iso})),
+        ...r2.map(r => ({...r, _dateIdx: 2, _dateIso: dates[2].iso})),
+      ].sort((a, b) => {
+        if (a._dateIso !== b._dateIso) return a._dateIso.localeCompare(b._dateIso)
+        return a.hour - b.hour
+      })
+      setAllRooms(merged)
     } catch (e) {
       console.error(e)
     } finally {
@@ -465,7 +484,7 @@ export default function Home() {
         bookingData: {
           bookingId: joinRoom.id, name: joinName,
           phone: joinPhone, email: joinEmail,
-          roomName, date: dates[sideDateIdx].iso,
+          roomName, date: joinRoom._dateIso || dates[sideDateIdx].iso,
           time: `${String(joinRoom.hour).padStart(2,'0')}:00`,
         }
       })
@@ -553,18 +572,29 @@ export default function Home() {
 
   function renderRooms() {
     if (loadingRooms) return <div className="loading-row"><Spinner /></div>
-    if (!openRooms.length) return <p className="no-rooms">{t.noRooms}</p>
-    return openRooms.map(r => {
+    const filtered = sideFilter === 'all'
+      ? allRooms
+      : allRooms.filter(r => r._dateIdx === sideFilter)
+    if (!filtered.length) return <p className="no-rooms">{t.noRooms}</p>
+    return filtered.map(r => {
       const { roomName, members } = extractRoomInfo(r)
       const allMembers = [r.name, ...members]
+      const dateLabel = r._dateIdx === 0
+        ? (lang==='es'?'Hoy':'Today')
+        : r._dateIdx === 1
+          ? (lang==='es'?'Mañana':'Tomorrow')
+          : dates[2]?.mon + ' ' + dates[2]?.num
       return (
-        <div key={r.id} className="rcard" onClick={() => { setJoinRoom(r); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}>
+        <div key={r.id} className="rcard" onClick={() => { setJoinRoom({...r, _dateIso: r._dateIso}); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}>
           <div className="rtop">
             <div>
               <div className="rname">{roomName}</div>
               <div className="rhost">{t.host}: {r.name}</div>
             </div>
-            <span className="rtime">⏰ {String(r.hour).padStart(2,'0')}:00</span>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
+              <span className="rtime">⏰ {String(r.hour).padStart(2,'0')}:00</span>
+              <span style={{fontSize:10,background:'var(--lime)',color:'var(--green)',borderRadius:10,padding:'1px 7px',fontWeight:700}}>{dateLabel}</span>
+            </div>
           </div>
           <div className="rbot">
             <div className="avs">
@@ -575,7 +605,7 @@ export default function Home() {
               ))}
               {allMembers.length > 5 && <div className="av" style={{background:'#e4e3de'}}>+{allMembers.length-5}</div>}
             </div>
-            <button className="jbtn" onClick={e => { e.stopPropagation(); setJoinRoom(r); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}>
+            <button className="jbtn" onClick={e => { e.stopPropagation(); setJoinRoom({...r, _dateIso: r._dateIso}); setJoinName(''); setJoinPhone(''); setJoinEmail('') }}>
               {t.opJoin.toUpperCase()}
             </button>
           </div>
@@ -892,7 +922,9 @@ export default function Home() {
                         <span style={{fontSize:13,fontWeight:400}}> · {players.length + 1} {lang==='es'?'persona':'person'}{players.length > 0 ? 's' : ''}</span>
                       </div>
                       <div style={{fontSize:11,color:'var(--gray-500)'}}>
-                        ${OPEN_PLAY_PRICE} × {players.length + 1} · {lang==='es'?`$50 anticipo · $${OPEN_PLAY_PRICE-50} al llegar/persona`:`$50 deposit · $${OPEN_PLAY_PRICE-50} on arrival/person`}
+                        ${OPEN_PLAY_PRICE} × {players.length + 1} · {lang==='es'
+                          ? `$50 anticipo por reserva · $${OPEN_PLAY_PRICE * (players.length + 1) - 50} al llegar en total`
+                          : `$50 deposit per booking · $${OPEN_PLAY_PRICE * (players.length + 1) - 50} total on arrival`}
                       </div>
                     </div>
                     <button className="rbtn" onClick={handleCreateRoom} disabled={submitting}>
@@ -909,8 +941,24 @@ export default function Home() {
         <div className="sc">
           {/* Salas */}
           <div className="stitle"><LiveDot/>{t.sideTitle}</div>
-          {renderDateStrip(sideDateIdx, i => setSideDateIdx(i), 'sds')}
-          <div style={{marginBottom:10}}/>
+          <div style={{display:'flex',gap:5,marginBottom:10,flexWrap:'wrap'}}>
+            {['all',0,1,2].map((f,i) => {
+              const labels = lang==='es'
+                ? ['Todas','Hoy','Mañana',dates[2]?.mon+' '+dates[2]?.num]
+                : ['All','Today','Tomorrow',dates[2]?.mon+' '+dates[2]?.num]
+              return (
+                <button key={f} onClick={() => setSideFilter(f)}
+                  style={{
+                    fontSize:11,padding:'4px 10px',borderRadius:20,border:'1.5px solid',
+                    cursor:'pointer',fontWeight:600,
+                    background: sideFilter===f ? 'var(--green)' : 'transparent',
+                    color: sideFilter===f ? '#fff' : 'var(--gray-500)',
+                    borderColor: sideFilter===f ? 'var(--green)' : 'var(--gray-100)',
+                  }}
+                >{labels[i]}</button>
+              )
+            })}
+          </div>
           <div className="rooms-list">{renderRooms()}</div>
           <button className="crbtn" onClick={() => { setMode('open'); setOpMode('create') }}>
             {t.createRoomSide}
