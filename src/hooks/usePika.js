@@ -124,42 +124,52 @@ async function executeTool(toolName, toolInput) {
         }
       }
       case 'create_court_booking': {
-        const prices = { 60: 450, 90: 650, 120: 800, 150: 1050 }
-        // Normalize court — PICA may send "Cancha 2", "2", or 2
-        let courtName = toolInput.court
-        if (typeof courtName === 'number') courtName = `Cancha ${courtName}`
-        else if (/^\d+$/.test(String(courtName).trim())) courtName = `Cancha ${courtName}`
-        else if (!String(courtName).toLowerCase().includes('cancha')) courtName = `Cancha ${courtName}`
-
-        const result = await createPublicBooking({
-          date: toolInput.date, hour: toolInput.hour, startMinute: toolInput.start_minute || 0,
-          court: courtName, duration: toolInput.duration,
-          name: toolInput.name, phone: toolInput.phone, email: toolInput.email
-        })
-        const totalPrice = prices[toolInput.duration] || 450
-        return {
-          success: true, booking_id: result.id,
-          reference: 'PBL-' + String(result.id).slice(-6).toUpperCase(),
-          court: courtName, date: toolInput.date,
+        const prices = { 60: 400, 90: 600, 120: 750, 150: 950 }
+        const totalPrice = prices[toolInput.duration] || 400
+        const bookingData = {
+          date: toolInput.date, hour: toolInput.hour,
+          startMinute: toolInput.start_minute || 0,
+          duration: toolInput.duration, name: toolInput.name,
+          phone: toolInput.phone, email: toolInput.email,
           time: `${String(toolInput.hour).padStart(2,'0')}:${String(toolInput.start_minute||0).padStart(2,'0')}`,
-          duration_min: toolInput.duration,
-          total_price_mxn: totalPrice,
-          deposit_mxn: 50,
-          balance_at_arrival_mxn: totalPrice - 50,
         }
+        try {
+          const resp = await fetch('/.netlify/functions/stripe-checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'cancha', bookingData, origin: window.location.origin }),
+          })
+          const data = await resp.json()
+          if (data.url) {
+            sessionStorage.setItem('pending_booking', JSON.stringify({ type: 'cancha', bookingData }))
+            window.location.href = data.url
+            return { success: true, redirecting: true }
+          }
+        } catch(e) { /* ignore */ }
+        return { success: false, error: 'Error al iniciar pago', total_price_mxn: totalPrice }
       }
       case 'create_open_play_room': {
-        const result = await createOpenPlayRoom({
-          date: toolInput.date, hour: toolInput.hour, court: COURTS[0],
+        const bookingData = {
+          date: toolInput.date, hour: toolInput.hour,
           roomName: toolInput.room_name, hostName: toolInput.host_name,
-          phone: toolInput.phone, email: toolInput.email, members: toolInput.members || []
-        })
-        return {
-          success: true, booking_id: result.id,
-          reference: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
-          room_name: toolInput.room_name, date: toolInput.date,
-          time: `${String(toolInput.hour).padStart(2,'0')}:00`, price_per_person: 250
+          phone: toolInput.phone, email: toolInput.email,
+          members: toolInput.members || [],
+          time: `${String(toolInput.hour).padStart(2,'0')}:00`,
         }
+        try {
+          const resp = await fetch('/.netlify/functions/stripe-checkout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'open_create', bookingData, origin: window.location.origin }),
+          })
+          const data = await resp.json()
+          if (data.url) {
+            sessionStorage.setItem('pending_booking', JSON.stringify({ type: 'open_create', bookingData }))
+            window.location.href = data.url
+            return { success: true, redirecting: true }
+          }
+        } catch(e) { /* ignore */ }
+        return { success: false, error: 'Error al iniciar pago' }
       }
       case 'find_booking': {
         const { data } = await supabase
@@ -245,7 +255,9 @@ REGLAS:
 - Maximo 3 oraciones por respuesta, se conciso
 - SIEMPRE verifica disponibilidad antes de reservar
 - SIEMPRE pide confirmacion antes de crear reserva
-- Solo PICA modifica reservas existentes
+- Al crear reserva o sala, se cobrara $50 MXN de anticipo via Stripe y se redirigira al pago
+- Al MODIFICAR una reserva (cambiar fecha/hora), NO se cobra nuevo anticipo — el ya pagado se respeta
+- Solo PICA modifica reservas existentes sin cobro adicional
 - Para fechas fuera de los 3 dias del calendario, usa las herramientas normalmente`
 
 async function callClaude(messages) {
