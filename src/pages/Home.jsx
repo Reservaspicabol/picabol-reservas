@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   supabase, COURTS, PRICES, OPEN_PLAY_PRICE, DEPOSIT,
   getOccupiedSlots, getOpenPlayRooms,
-  createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom, checkPromoCode
+  createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom, checkPromoCode,
+  getReservationBlocks, isWithinOperatingHours
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
 import { downloadBookingPDF } from '../hooks/useDownload'
@@ -274,6 +275,10 @@ export default function Home() {
   }, [selDateIdx, selCourt])
 
   useEffect(() => {
+    setSelSlot(null)
+  }, [selDur])
+
+  useEffect(() => {
     loadRooms(sideDateIdx)
     // Realtime — actualizar salas cuando cambia cualquier booking de openplay
     const channel = supabase
@@ -307,17 +312,19 @@ export default function Home() {
     const now = new Date()
     const isToday = selDateIdx === 0
     const nowMins = now.getHours() * 60 + now.getMinutes()
+    const dateIso = dates[selDateIdx].iso
+    const blocks = getReservationBlocks(dateIso)
     try {
       const results = await Promise.all(
-        COURTS.map((_, i) => getOccupiedSlots(i, dates[selDateIdx].iso))
+        COURTS.map((_, i) => getOccupiedSlots(i, dateIso))
       )
       const availability = results.map(occupied => {
         // Check if there's at least one available slot in the future
-        for (let h = 8; h <= 21; h++) {
-          for (const m of ['00', '30']) {
-            if (h === 21 && m === '30') continue
-            const slotMins = h * 60 + (m === '30' ? 30 : 0)
-            if (isToday && slotMins < nowMins + 120) continue
+        for (const b of blocks) {
+          for (let mins = b.startMin; mins < b.endMin; mins += 30) {
+            const h = Math.floor(mins / 60)
+            const m = mins % 60 === 0 ? '00' : '30'
+            if (isToday && mins < nowMins + 120) continue
             if (!occupied.has(`${h}:${m}`)) return true
           }
         }
@@ -358,19 +365,33 @@ export default function Home() {
     }
   }
 
+  // Horas de inicio validas para Open Play (3h continuas, inicio en punto) en una fecha dada
+  function getOpenPlayStartHours(dateIso) {
+    const hours = []
+    for (let h = 0; h < 24; h++) {
+      if (isWithinOperatingHours(dateIso, h, 0, 180)) hours.push(h)
+    }
+    return hours
+  }
+
   async function loadOpenSlots() {
     // Open Play no requiere cancha específica — el admin asigna al llegar
     // Solo calculamos los horarios válidos según hora actual
     const now = new Date()
     const isToday = createDateIdx === 0
     const nowMins = now.getHours() * 60 + now.getMinutes()
+    const dateIso = dates[createDateIdx].iso
+    const validHours = getOpenPlayStartHours(dateIso)
     // Auto-select first valid slot
-    for (let h = 8; h <= 19; h++) {
+    let picked = false
+    for (const h of validHours) {
       const slotMins = h * 60
       if (isToday && slotMins < nowMins + 120) continue
       setSalaHour(`${h}:00`)
+      picked = true
       break
     }
+    if (!picked && validHours.length > 0) setSalaHour(`${validHours[0]}:00`)
     setOpenOccupiedSlots(new Set()) // no bloqueamos horarios para open play
   }
 
@@ -576,16 +597,20 @@ export default function Home() {
     if (loadingSlots) return <div className="loading-row"><Spinner /> <span style={{marginLeft:8,color:'var(--gray-500)'}}>Consultando disponibilidad...</span></div>
     const now = new Date()
     const isToday = selDateIdx === 0
+    const dateIso = dates[selDateIdx].iso
+    const blocks = getReservationBlocks(dateIso)
     const slots = []
     let hasAvailable = false
-    for (let h = 8; h <= 21; h++) { // max 21:00 — cierra a las 10pm, min 1hr
-      for (const m of ['00', '30']) {
-        if (h === 21 && m === '30') continue // max 21:00
-        const slotMins = h * 60 + (m === '30' ? 30 : 0)
+    for (const b of blocks) {
+      for (let mins = b.startMin; mins < b.endMin; mins += 30) {
+        const h = Math.floor(mins / 60)
+        const m = mins % 60 === 0 ? '00' : '30'
         const nowMins = now.getHours() * 60 + now.getMinutes()
-        const isPast = isToday && slotMins < nowMins + 120
+        const isPast = isToday && mins < nowMins + 120
         const taken = occupiedSlots.has(`${h}:${m}`)
-        if (isPast || taken) continue
+        // Verifica que la duracion seleccionada quepa dentro del bloque desde este slot
+        const fitsDuration = isWithinOperatingHours(dateIso, h, m === '30' ? 30 : 0, selDur)
+        if (isPast || taken || !fitsDuration) continue
         hasAvailable = true
         const key = `${h}:${m}`
         slots.push(
@@ -601,7 +626,7 @@ export default function Home() {
     }
     if (!hasAvailable) return (
       <p style={{fontSize:12,color:'var(--gray-500)',fontStyle:'italic',padding:'8px 0'}}>
-        {lang==='es' ? 'No hay horarios disponibles para este día. Prueba otro día o escríbele a PICA.' : 'No available slots for this day. Try another day or message PICA.'}
+        {lang==='es' ? 'No hay horarios disponibles para esta duración en este día. Prueba otra duración u otro día.' : 'No available slots for this duration on this day. Try another duration or day.'}
       </p>
     )
     return slots
@@ -926,9 +951,10 @@ export default function Home() {
                         const now = new Date()
                         const isToday = createDateIdx === 0
                         const nowMins = now.getHours() * 60 + now.getMinutes()
+                        const dateIso = dates[createDateIdx].iso
                         const slots = []
                         let hasAny = false
-                        for (let h = 8; h <= 19; h++) { // max 19:00 — 3hrs, cierra 10pm
+                        for (const h of getOpenPlayStartHours(dateIso)) {
                           const slotMins = h * 60
                           if (isToday && slotMins < nowMins + 120) continue
                           if (openOccupiedSlots.has(`${h}:00`)) continue
