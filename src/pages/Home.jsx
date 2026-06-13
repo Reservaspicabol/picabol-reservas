@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   supabase, COURTS, PRICES, OPEN_PLAY_PRICE, DEPOSIT,
   getOccupiedSlots, getOpenPlayRooms,
-  createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom
+  createPublicBooking, createOpenPlayRoom, joinOpenPlayRoom, checkPromoCode
 } from '../lib/supabase'
 import { usePika } from '../hooks/usePika'
 import { downloadBookingPDF } from '../hooks/useDownload'
@@ -36,6 +36,8 @@ const T = {
     salaHost: 'Tu nombre (titular)',
     jugadores: 'Jugadores (sin límite)',
     addPlayer: 'Nombre del jugador',
+    promoLabel: 'Código de promoción (opcional)',
+    promoPlaceholder: 'Si tienes uno',
     hora: 'Hora',
     crearSala: 'CREAR SALA',
     joinTitle: 'UNIRSE A SALA',
@@ -93,6 +95,8 @@ const T = {
     salaHost: 'Your name (host)',
     jugadores: 'Players (no limit)',
     addPlayer: 'Player name',
+    promoLabel: 'Promo code (optional)',
+    promoPlaceholder: 'If you have one',
     hora: 'Time',
     crearSala: 'CREATE ROOM',
     joinTitle: 'JOIN ROOM',
@@ -229,6 +233,7 @@ export default function Home() {
   const [salaTel, setSalaTel] = useState('')
   const [salaEmail, setSalaEmail] = useState('')
   const [salaHour, setSalaHour] = useState('10:00')
+  const [salaPromo, setSalaPromo] = useState('')
   const [players, setPlayers] = useState([])
   const [playerInput, setPlayerInput] = useState('')
 
@@ -456,6 +461,38 @@ export default function Home() {
     setSubmitting(true)
     try {
       const [h] = salaHour.split(':').map(Number)
+
+      // Si hay codigo de promocion valido, crear la sala directo sin pasar por Stripe
+      if (salaPromo.trim()) {
+        const isValid = await checkPromoCode(salaPromo)
+        if (isValid) {
+          const result = await createOpenPlayRoom({
+            date: dates[createDateIdx].iso, hour: h,
+            roomName: salaName, hostName: salaHost,
+            phone: salaTel, email: salaEmail, members: players,
+            promoApplied: true,
+          })
+          setSuccess({
+            ref: 'OPL-' + String(result.id).slice(-6).toUpperCase(),
+            type: 'open',
+            details: {
+              name: salaHost, phone: salaTel, email: salaEmail,
+              roomName: salaName,
+              court: result.courtName || `Cancha ${result.court}`,
+              date: dates[createDateIdx].iso, time: salaHour, price: 0,
+              promoApplied: true,
+            }
+          })
+          setTimeout(() => loadRooms(createDateIdx), 500)
+          setSubmitting(false)
+          return
+        } else {
+          alert(lang === 'es' ? 'Código de promoción no válido' : 'Invalid promo code')
+          setSubmitting(false)
+          return
+        }
+      }
+
       await initiateStripeCheckout({
         type: 'open_create',
         bookingData: {
@@ -876,6 +913,8 @@ export default function Home() {
                     <input className="finp" placeholder={t.addPlayer} value={playerInput} onChange={e => setPlayerInput(e.target.value)} onKeyDown={e => e.key==='Enter' && addPlayer()}/>
                     <button className="abtn" onClick={addPlayer}>+</button>
                   </div>
+                  <p className="slbl" style={{marginTop:12}}>{t.promoLabel}</p>
+                  <input className="finp" placeholder={t.promoPlaceholder} value={salaPromo} onChange={e => setSalaPromo(e.target.value)} style={{marginBottom:7}}/>
                   <p className="slbl" style={{marginTop:12}}>{t.labFecha}</p>
                   {renderDateStrip(createDateIdx, i => { setCreateDateIdx(i) }, 'crds')}
                   <p className="slbl">{t.hora}</p>
@@ -1098,7 +1137,11 @@ export default function Home() {
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🏓 {success.details.roomName}</div>
                   {success.details.court && <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>🎾 {success.details.court}</div>}
                   <div style={{fontSize:12,color:'rgba(255,255,255,0.8)',marginBottom:2}}>📅 {success.details.date} · {success.details.time}</div>
-                  <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>💰 <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong> {lang==='es'?'por persona':'per person'}</div>
+                  {success.details.promoApplied ? (
+                    <div style={{fontSize:12,color:'var(--lime)'}}>🎁 {lang==='es' ? 'Código de promoción aplicado — anticipo exento' : 'Promo code applied — deposit waived'}</div>
+                  ) : (
+                    <div style={{fontSize:12,color:'rgba(255,255,255,0.8)'}}>💰 <strong style={{color:'var(--lime)'}}>${success.details.price} MXN</strong> {lang==='es'?'por persona':'per person'}</div>
+                  )}
                 </>}
               </div>
             </div>

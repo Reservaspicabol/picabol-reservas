@@ -10,6 +10,39 @@ export const PRICES = { 60: 400, 90: 600, 120: 750, 150: 950 }
 export const OPEN_PLAY_PRICE = 200
 export const DEPOSIT = 50
 
+// ── Horarios de operacion ────────────────────────────────────────────────────
+// Devuelve los bloques de horario disponibles para RESERVAR (no de apertura del lugar)
+// segun el dia de la semana. Cada bloque: { startMin, endMin } en minutos desde 00:00.
+// endMin es el limite MAXIMO de fin de una reserva (no de inicio).
+export function getReservationBlocks(dateStr) {
+  const day = new Date(dateStr + 'T12:00:00').getDay() // 0=domingo...6=sabado
+  if (day === 0) return [] // domingo cerrado
+  if (day === 6) return [{ startMin: 7 * 60, endMin: 13 * 60 }] // sabado 7am-1pm
+  // lunes a viernes: dos bloques
+  return [
+    { startMin: 7 * 60,  endMin: 10 * 60 }, // 7am-10am
+    { startMin: 16 * 60, endMin: 22 * 60 }, // 4pm-10pm (ultimo inicio 9pm, max 1h)
+  ]
+}
+
+// Verifica si una reserva (inicio + duracion) cabe dentro de algun bloque de operacion
+export function isWithinOperatingHours(dateStr, hour, startMinute, durationMinutes) {
+  const startTotal = hour * 60 + (startMinute || 0)
+  const endTotal   = startTotal + durationMinutes
+  const blocks = getReservationBlocks(dateStr)
+  return blocks.some(b => startTotal >= b.startMin && endTotal <= b.endMin)
+}
+
+// Texto legible de horarios para un dia dado (para mensajes de error)
+export function describeOperatingHours(dateStr) {
+  const blocks = getReservationBlocks(dateStr)
+  if (blocks.length === 0) return 'Cerrado este dia (domingo)'
+  return blocks.map(b => {
+    const fmt = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`
+    return `${fmt(b.startMin)} - ${fmt(b.endMin)}`
+  }).join(' y ')
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function toCourtNum(court) {
@@ -135,10 +168,34 @@ export async function getOpenPlayRooms(dateStr) {
 
 // ── Creación de reservas ──────────────────────────────────────────────────────
 
+// ── Codigo de promocion (Open Play, solo al crear sala) ──────────────────────
+// Devuelve el codigo activo actual (string) o null si no hay ninguno configurado
+export async function getActivePromoCode() {
+  const { data, error } = await supabase
+    .from('promo_codes')
+    .select('code')
+    .eq('active', true)
+    .limit(1)
+  if (error || !data || data.length === 0) return null
+  return data[0].code || null
+}
+
+// Compara (case-insensitive, trim) un codigo ingresado contra el activo
+export async function checkPromoCode(inputCode) {
+  if (!inputCode || !inputCode.trim()) return false
+  const active = await getActivePromoCode()
+  if (!active) return false
+  return active.trim().toLowerCase() === inputCode.trim().toLowerCase()
+}
+
 // Cancha privada — asigna automáticamente o usa preferencia si está libre
 export async function createPublicBooking({ date, hour, startMinute, duration, name, phone, email, preferredCourt }) {
   const durationHours = duration / 60
   const revenue = PRICES[duration] || 400
+
+  if (!isWithinOperatingHours(date, hour, startMinute || 0, duration)) {
+    throw new Error(`Ese horario esta fuera de operacion. Horario disponible para ${date}: ${describeOperatingHours(date)}`)
+  }
 
   let courtNum
   if (preferredCourt) {
@@ -176,7 +233,12 @@ export async function createPublicBooking({ date, hour, startMinute, duration, n
 }
 
 // Crear sala open play — asigna automáticamente la primera cancha libre
-export async function createOpenPlayRoom({ date, hour, roomName, hostName, phone, email, members }) {
+// promoApplied: true si el creador uso un codigo de promocion valido (exento de anticipo)
+export async function createOpenPlayRoom({ date, hour, roomName, hostName, phone, email, members, promoApplied }) {
+  if (!isWithinOperatingHours(date, hour, 0, 180)) {
+    throw new Error(`Ese horario esta fuera de operacion para Open Play (requiere 3h continuas). Horario disponible para ${date}: ${describeOperatingHours(date)}`)
+  }
+
   const allMembers = [hostName, ...(members || [])]
   const peopleCount = allMembers.length
   const revenue = OPEN_PLAY_PRICE * peopleCount
@@ -184,6 +246,8 @@ export async function createOpenPlayRoom({ date, hour, roomName, hostName, phone
 
   // Buscar primera cancha disponible para 3 horas
   const courtNum = await findAvailableCourt(date, hour, 0, 3)
+
+  const promoTag = promoApplied ? ' | PROMO: anticipo exento' : ''
 
   const { data, error } = await supabase
     .from('bookings')
@@ -194,7 +258,7 @@ export async function createOpenPlayRoom({ date, hour, roomName, hostName, phone
       court: courtNum,
       modality: 'openplay',
       name: hostName,
-      notes: `Sala: ${roomName} | Miembros: ${membersStr} | Tel: ${phone} | Email: ${email} | SITIO WEB PUBLICO`,
+      notes: `Sala: ${roomName} | Miembros: ${membersStr} | Tel: ${phone} | Email: ${email} | SITIO WEB PUBLICO${promoTag}`,
       notes_players: JSON.stringify(allMembers),
       status: 'reserved',
       revenue,
@@ -243,3 +307,31 @@ export async function joinOpenPlayRoom(bookingId, newMemberName, phone, email) {
   if (error) throw error
   return { bookingId, newMember: newMemberName, totalPeople: newPeople }
 }
+
+// Ultima reserva registrada desde el sitio web (cualquier fecha, futura o pasada)
+// Util para que PICA sepa si hubo actividad reciente, sin importar que tan lejos sea la fecha
+export async function getLastWebBooking() {
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id, date, hour, start_minute, court, modality, name, status, created_at')
+    .ilike('notes', '%SITIO WEB PUBLICO%')
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  if (!data || data.length === 0) return { found: false }
+  const b = data[0]
+  return {
+    found: true,
+    id: b.id,
+    date: b.date,
+    hour: b.hour,
+    start_minute: b.start_minute || 0,
+    court: b.court,
+    modality: b.modality,
+    name: b.name,
+    status: b.status,
+    created_at: b.created_at,
+  }
+}
+

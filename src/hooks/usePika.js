@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react'
 import {
   supabase, COURTS, PRICES, OPEN_PLAY_PRICE,
   getOccupiedSlots, getOpenPlayRooms,
-  createPublicBooking, createOpenPlayRoom
+  createPublicBooking, createOpenPlayRoom,
+  getReservationBlocks, describeOperatingHours, getLastWebBooking, checkPromoCode
 } from '../lib/supabase'
 
 const TOOLS = [
@@ -59,7 +60,8 @@ const TOOLS = [
         host_name: { type: 'string' },
         phone: { type: 'string' },
         email: { type: 'string' },
-        members: { type: 'array', items: { type: 'string' } }
+        members: { type: 'array', items: { type: 'string' } },
+        promo_code: { type: 'string', description: 'Codigo de promocion, SOLO si el usuario lo menciona espontaneamente. No preguntes por esto.' }
       },
       required: ['date', 'hour', 'room_name', 'host_name', 'phone', 'email']
     }
@@ -73,6 +75,15 @@ const TOOLS = [
         name: { type: 'string', description: 'Nombre del titular' }
       },
       required: ['name']
+    }
+  },
+  {
+    name: 'get_last_booking',
+    description: 'Obtiene la ultima reserva registrada a traves del sitio web (de cualquier fecha, pasada o futura). Usalo SOLO cuando te pregunten directamente cual fue la ultima reserva o si se ha registrado algo recientemente.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: []
     }
   },
   {
@@ -96,16 +107,22 @@ async function executeTool(toolName, toolInput) {
     switch (toolName) {
       case 'check_availability': {
         const occupied = await getOccupiedSlots(toolInput.court_index, toolInput.date)
+        const blocks = getReservationBlocks(toolInput.date)
         const available = []
         const taken = []
-        for (let h = 8; h <= 22; h++) {
-          for (const m of ['00', '30']) {
-            if (h === 22 && m === '30') continue
-            const key = `${h}:${m}`
+        for (const b of blocks) {
+          for (let mins = b.startMin; mins < b.endMin; mins += 30) {
+            const h = Math.floor(mins / 60)
+            const m = mins % 60
+            const key = `${h}:${m === 0 ? '00' : '30'}`
             occupied.has(key) ? taken.push(key) : available.push(key)
           }
         }
-        return { court: COURTS[toolInput.court_index], date: toolInput.date, available_slots: available, occupied_slots: taken }
+        return {
+          court: COURTS[toolInput.court_index], date: toolInput.date,
+          operating_hours: describeOperatingHours(toolInput.date),
+          available_slots: available, occupied_slots: taken
+        }
       }
       case 'get_open_play_rooms': {
         const rooms = await getOpenPlayRooms(toolInput.date)
@@ -150,6 +167,21 @@ async function executeTool(toolName, toolInput) {
         return { success: false, error: 'Error al iniciar pago', total_price_mxn: totalPrice }
       }
       case 'create_open_play_room': {
+        // Si el usuario mencionó un codigo de promocion, validarlo y crear directo sin Stripe
+        if (toolInput.promo_code && toolInput.promo_code.trim()) {
+          const isValid = await checkPromoCode(toolInput.promo_code)
+          if (isValid) {
+            const result = await createOpenPlayRoom({
+              date: toolInput.date, hour: toolInput.hour,
+              roomName: toolInput.room_name, hostName: toolInput.host_name,
+              phone: toolInput.phone, email: toolInput.email,
+              members: toolInput.members || [],
+              promoApplied: true,
+            })
+            return { success: true, promo_applied: true, room_id: result.id, court: result.courtName, message: 'Sala creada sin anticipo (codigo de promocion aplicado)' }
+          }
+          return { success: false, error: 'Codigo de promocion invalido' }
+        }
         const bookingData = {
           date: toolInput.date, hour: toolInput.hour,
           roomName: toolInput.room_name, hostName: toolInput.host_name,
@@ -179,6 +211,9 @@ async function executeTool(toolName, toolInput) {
           .order('date', { ascending: false }).limit(5)
         return { found: (data||[]).length, bookings: data || [] }
       }
+      case 'get_last_booking': {
+        return await getLastWebBooking()
+      }
       case 'modify_booking': {
         const updates = {}
         if (toolInput.new_hour !== undefined) updates.hour = parseInt(toolInput.new_hour)
@@ -202,11 +237,28 @@ async function executeTool(toolName, toolInput) {
   }
 }
 
-const SYSTEM_PROMPT = `Eres PICA, la asistente inteligente de PICABOL en Cancun, Mexico.
+function buildSystemPrompt() {
+  const now = new Date()
+  const fmt = (d) => d.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  const ymd = (d) => d.toISOString().slice(0, 10)
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1)
+  const dayAfter = new Date(now); dayAfter.setDate(dayAfter.getDate() + 2)
 
-FECHA ACTUAL: ${new Date().toLocaleDateString('es-MX', {weekday:'long', year:'numeric', month:'long', day:'numeric'})}
-AÑO ACTUAL: ${new Date().getFullYear()}
-IMPORTANTE: Todas las reservas deben ser en el año ${new Date().getFullYear()} o posterior. NUNCA uses años pasados.
+  return `Eres PICA, la asistente inteligente de PICABOL en Cancun, Mexico.
+
+FECHA Y HORA ACTUAL: ${fmt(now)} — formato YYYY-MM-DD: ${ymd(now)}
+AÑO ACTUAL: ${now.getFullYear()}
+
+REFERENCIA DE FECHAS (usa esto para no confundir el dia de la semana con la fecha):
+- HOY = ${ymd(now)} (${fmt(now)})
+- MAÑANA = ${ymd(tomorrow)} (${fmt(tomorrow)})
+- PASADO MAÑANA = ${ymd(dayAfter)} (${fmt(dayAfter)})
+
+REGLA CRITICA DE FECHAS:
+- SIEMPRE verifica que el dia de la semana corresponda exactamente a la fecha YYYY-MM-DD antes de usarla en cualquier herramienta.
+- Si el usuario dice "el viernes" o "el sabado que viene", calcula la fecha exacta usando HOY como referencia — NUNCA asumas o inventes una fecha.
+- Todas las reservas deben ser en el año ${now.getFullYear()} o posterior. NUNCA uses años pasados.
+- Si tienes cualquier duda sobre que fecha corresponde a que dia, usa check_availability con la fecha calculada para confirmar antes de reservar.
 
 UBICACION:
 - Direccion: Los Olivos S/N, 77560 Cancun, Q.R., Mexico
@@ -214,10 +266,10 @@ UBICACION:
 - Telefono: 834 477 5287
 - Sitio web: picabolmx.com
 
-HORARIOS DE OPERACION:
-- Lunes a Viernes: 7:00 AM - 10:00 PM
-- Sabado: 7:00 AM - 2:00 PM
-- Domingo: 8:00 AM - 1:00 PM
+HORARIOS DE OPERACION (para reservar):
+- Lunes a Viernes: 7:00 AM - 10:00 AM y 4:00 PM - 10:00 PM (DOS bloques, cerrado de 10am a 4pm)
+- Sabado: 7:00 AM - 1:00 PM (ultima reserva posible: 12:00pm por 1 hora)
+- Domingo: CERRADO todo el dia — no se puede reservar nada
 
 PRECIOS (precio total — el anticipo de $50 MXN esta INCLUIDO en el precio total):
 - Cancha privada 60min: $400 MXN total ($50 anticipo online + $350 al llegar)
@@ -228,11 +280,13 @@ PRECIOS (precio total — el anticipo de $50 MXN esta INCLUIDO en el precio tota
 - Tolerancia: 10 min despues de la hora reservada
 - Cancelacion: hasta 2 horas antes sin penalizacion adicional
 
-HORARIOS PARA RESERVAR (ultimos horarios posibles):
-- Cancha privada: ultimo horario disponible es 21:00 (9pm) — minimo 1 hora, cierra a las 10pm
-- Open Play: ultimo horario disponible es 19:00 (7pm) — minimo 3 horas, cierra a las 10pm
-- NUNCA ofrezcas horarios despues de las 21:00 para cancha privada
-- NUNCA ofrezcas horarios despues de las 19:00 para open play
+HORARIOS PARA RESERVAR (reglas por dia, ultimos horarios posibles):
+- Lunes a Viernes, bloque mañana (7am-10am): cancha privada puede iniciar hasta las 9:00am (1h, termina 10am). NO hay Open Play en este bloque salvo que inicie exactamente a las 7am (3h, termina 10am).
+- Lunes a Viernes, bloque tarde (4pm-10pm): cancha privada puede iniciar hasta las 9:00pm pero SOLO por 1 hora (cierra 10pm). Open Play puede iniciar entre 4pm y 7pm (3h continuas, termina max 10pm).
+- Sabado (7am-1pm): cancha privada puede iniciar hasta las 12:00pm (1h, termina 1pm). Open Play NO cabe (requiere 3h y solo hay 6h totales validas desde 7am hasta 1pm — si cabe exactamente de 7am a 10am puede ofrecerse, valida con check_availability).
+- Domingo: NUNCA ofrezcas ni reserves nada, esta cerrado.
+- SIEMPRE usa check_availability para confirmar que un horario es valido antes de ofrecerlo — la herramienta ya conoce los bloques reales de cada dia.
+- Si el sistema (create_court_booking o create_open_play_room) responde con un error de "fuera de operacion", informa al usuario el horario disponible que te indique el error y ofrece alternativas dentro de esos bloques.
 
 IMPORTANTE AL INFORMAR PRECIOS:
 - SIEMPRE di el precio total primero, luego el desglose
@@ -245,20 +299,32 @@ Si esta libre, incluye preferred_court en create_court_booking.
 Si no esta libre, sugiere otra cancha disponible o diferente horario.
 
 CAPACIDADES - usa las herramientas disponibles:
-1. check_availability: consulta slots libres en cualquier fecha y cancha
+1. check_availability: consulta slots libres en cualquier fecha y cancha (respeta horarios reales de operacion)
 2. get_open_play_rooms: ve salas activas de open play
 3. create_court_booking: reserva cancha (confirma datos primero)
 4. create_open_play_room: crea sala open play
 5. find_booking: busca reserva existente por nombre
 6. modify_booking: modifica reserva (solo PICA puede)
+7. get_last_booking: consulta la ultima reserva registrada via sitio web (cualquier fecha)
 
 FLUJO RESERVA:
 1. Pregunta fecha, hora preferida, cancha y duracion
-2. Verifica disponibilidad con check_availability
+2. Verifica disponibilidad con check_availability (esto tambien confirma que el dia/fecha y horario sean validos)
 3. Si disponible, pide nombre completo, celular y correo
 4. Resume: "Voy a reservar [Cancha X] el [fecha] a las [hora] por [duracion]. Total: $[precio] MXN ($50 anticipo + $[resto] al llegar). Tu nombre: [nombre]. ¿Confirmas?"
 5. Solo al recibir confirmacion, ejecuta create_court_booking
 6. Confirma con referencia y desglose de pago
+
+SOBRE "CODIGO DE PROMOCION" (solo Open Play, solo al CREAR sala):
+- Si el usuario menciona espontaneamente que tiene un codigo de promocion (ej. "tengo el codigo VERANO2026"), incluye ese valor en promo_code al llamar create_open_play_room.
+- NUNCA preguntes proactivamente si tiene un codigo.
+- Esto NO aplica para unirse a una sala existente, solo para crearla.
+- Si el codigo es invalido, informa al usuario y continua normalmente (ofreciendo el pago de anticipo regular).
+
+SOBRE "ULTIMA RESERVA":
+- Si te preguntan directamente "cual fue la ultima reserva?" o "se ha registrado algo recientemente?", usa get_last_booking.
+- Si no te preguntan nada al respecto, NO menciones esto de forma proactiva.
+- Si get_last_booking encuentra una reserva, puedes confirmar que SI existe una reserva reciente (con fecha y hora), pero NO reveles el nombre del cliente a menos que te lo pidan explicitamente.
 
 REGLAS:
 - Responde en el idioma del usuario (es/en)
@@ -271,6 +337,7 @@ REGLAS:
 - NUNCA inventes soluciones, NUNCA des numeros de telefono sin el link de WhatsApp
 - Solo PICA modifica reservas existentes sin cobro adicional
 - Para fechas fuera de los 3 dias del calendario, usa las herramientas normalmente`
+}
 
 async function callClaude(messages) {
   const resp = await fetch('/.netlify/functions/pika', {
@@ -281,7 +348,7 @@ async function callClaude(messages) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-5',
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(),
       tools: TOOLS,
       messages,
     }),
