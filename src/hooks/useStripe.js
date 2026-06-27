@@ -1,6 +1,6 @@
 // Inicia el checkout de Stripe — redirige a la página de pago
 export async function initiateStripeCheckout({ type, bookingData }) {
-  const response = await fetch('/.netlify/functions/stripe-checkout', {
+  const response = await fetch('/api/stripe-checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type, bookingData, origin: window.location.origin }),

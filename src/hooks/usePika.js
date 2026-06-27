@@ -152,7 +152,7 @@ async function executeTool(toolName, toolInput) {
           preferredCourt: toolInput.preferred_court || null,
         }
         try {
-          const resp = await fetch('/.netlify/functions/stripe-checkout', {
+          const resp = await fetch('/api/stripe-checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'cancha', bookingData, origin: window.location.origin }),
@@ -190,7 +190,7 @@ async function executeTool(toolName, toolInput) {
           time: `${String(toolInput.hour).padStart(2,'0')}:00`,
         }
         try {
-          const resp = await fetch('/.netlify/functions/stripe-checkout', {
+          const resp = await fetch('/api/stripe-checkout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'open_create', bookingData, origin: window.location.origin }),
@@ -340,7 +340,7 @@ REGLAS:
 }
 
 async function callClaude(messages) {
-  const resp = await fetch('/.netlify/functions/pika', {
+  const resp = await fetch('/api/pika', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
